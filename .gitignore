@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build output
+dist/
+**/dist/
+build/
+
+# Turbo cache
+.turbo/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Models (can be many GB)
+models/
+
+# IDE
+.vscode/
+.idea/
+**/.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Test coverage
+coverage/
+**/coverage/
+
+# TypeScript
+*.tsbuildinfo
+
+# OS
+Thumbs.db

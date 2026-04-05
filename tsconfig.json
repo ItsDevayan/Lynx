@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "paths": {
+      "@lynx/core": ["./packages/core/src/index.ts"],
+      "@lynx/monitor": ["./packages/monitor/src/index.ts"],
+      "@lynx/crawler": ["./packages/crawler/src/index.ts"],
+      "@lynx/brain": ["./packages/brain/src/index.ts"],
+      "@lynx/guard": ["./packages/guard/src/index.ts"],
+      "@lynx/test-engine": ["./packages/test-engine/src/index.ts"],
+      "@lynx/scout": ["./packages/scout/src/index.ts"],
+      "@lynx/diagnostics": ["./packages/diagnostics/src/index.ts"]
+    }
+  },
+  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+}

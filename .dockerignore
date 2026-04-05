@@ -1,0 +1,33 @@
+# Node modules — rebuilt inside Docker
+node_modules
+**/node_modules
+
+# Build output — rebuilt inside Docker
+dist
+**/dist
+
+# Downloaded models — can be many GB, never needed in build context
+models/
+
+# Dev/test artifacts
+**/.turbo
+**/.next
+**/coverage
+**/*.log
+**/.env
+**/.env.*
+!**/.env.example
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+**/.DS_Store
+
+# Docker itself
+**/Dockerfile
+**/*.dockerfile
+docker-compose*.yml

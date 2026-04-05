@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "paths": {
+      "@lynx/core": ["../../packages/core/src/index.ts"],
+      "@lynx/monitor": ["../../packages/monitor/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*", "../../packages/core/src/**/*", "../../packages/monitor/src/**/*"]
+}

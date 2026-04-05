@@ -1,0 +1,99 @@
+version: '3.9'
+
+# Lynx Full Stack — 32GB+ RAM recommended
+# Includes everything in lite + SigNoz (OTel observability) + Ollama (local LLM)
+
+include:
+  - docker-compose.lite.yml
+
+services:
+  # ─── SigNoz (OpenTelemetry-native observability) ───────────────────────────
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.1
+    container_name: lynx-clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: signoz_metrics
+      CLICKHOUSE_USER: admin
+      CLICKHOUSE_PASSWORD: password
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    ports:
+      - "9000:9000"
+      - "8123:8123"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  signoz-otel-collector:
+    image: signoz/signoz-otel-collector:latest
+    container_name: lynx-otel-collector
+    restart: unless-stopped
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    environment:
+      CLICKHOUSE_URL: tcp://admin:password@clickhouse:9000
+    volumes:
+      - ./signoz-otel-config.yaml:/etc/otel-collector-config.yaml
+
+  signoz-query:
+    image: signoz/query-service:latest
+    container_name: lynx-signoz-query
+    restart: unless-stopped
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      ClickHouseUrl: tcp://admin:password@clickhouse:9000
+      STORAGE: clickhouse
+
+  signoz-frontend:
+    image: signoz/frontend:latest
+    container_name: lynx-signoz-frontend
+    restart: unless-stopped
+    depends_on:
+      - signoz-query
+    ports:
+      - "3301:3301"
+    environment:
+      FRONTEND_API_ENDPOINT: http://signoz-query:8080
+
+  # ─── Ollama (Local LLM) ───────────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: lynx-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    # GPU support: uncomment if NVIDIA GPU available
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  clickhouse_data:
+  ollama_data:

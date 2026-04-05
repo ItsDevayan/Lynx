@@ -1,0 +1,35 @@
+{
+  "name": "@lynx/monitor",
+  "version": "0.1.0",
+  "description": "Lynx monitoring — error tracking, fingerprinting, dedup, OTel bridge, APM",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --sourcemap --tsconfig tsconfig.json",
+    "dev": "tsup src/index.ts --format esm --dts --watch --tsconfig tsconfig.json",
+    "test": "vitest run",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@lynx/core": "workspace:*",
+    "pg": "^8.13.0",
+    "node-cron": "^3.0.3",
+    "source-map": "^0.7.4",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0",
+    "@types/pg": "^8.11.0",
+    "@types/node-cron": "^3.0.11",
+    "@types/node": "^20.0.0"
+  }
+}
