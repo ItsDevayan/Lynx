@@ -86,6 +86,8 @@ interface Message {
   hitlId?: string;
   hitlStatus?: 'pending' | 'approved' | 'rejected';
   hasCodeProposal?: boolean;
+  // Apply-to-file
+  appliedFiles?: string[]; // files that were successfully written
 }
 
 // ─── HITL helpers ─────────────────────────────────────────────────────────────
@@ -140,6 +142,102 @@ async function createHITLRequest(opts: {
   } catch {
     return null;
   }
+}
+
+// ─── Apply-to-file helpers ────────────────────────────────────────────────────
+
+/** Parse all code blocks with a detectable filename from a Brain message */
+function parseCodeBlocks(content: string): Array<{ filename: string | null; lang: string; code: string }> {
+  const blocks: Array<{ filename: string | null; lang: string; code: string }> = [];
+  const re = /```([\w.]*)\n([\s\S]*?)```/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    const lang = m[1] ?? '';
+    const code = m[2] ?? '';
+    // Look for filename hint in the first comment line: // src/foo.ts  or # src/foo.py
+    const firstLine = code.split('\n')[0]?.trim() ?? '';
+    const fileMatch = firstLine.match(/^(?:\/\/|#|\/\*)\s*([\w./\\-]+\.[\w]+)/);
+    blocks.push({ filename: fileMatch?.[1] ?? null, lang, code });
+  }
+  return blocks;
+}
+
+/** Compute a simple line-level diff between two strings */
+function computeDiff(oldText: string, newText: string): Array<{ type: 'add' | 'del' | 'ctx'; line: string }> {
+  const oldLines = oldText.split('\n');
+  const newLines = newText.split('\n');
+  const result: Array<{ type: 'add' | 'del' | 'ctx'; line: string }> = [];
+
+  // Simple LCS-based diff (good enough for display)
+  let oi = 0, ni = 0;
+  while (oi < oldLines.length || ni < newLines.length) {
+    if (oi >= oldLines.length) { result.push({ type: 'add', line: newLines[ni++]! }); continue; }
+    if (ni >= newLines.length) { result.push({ type: 'del', line: oldLines[oi++]! }); continue; }
+    if (oldLines[oi] === newLines[ni]) {
+      result.push({ type: 'ctx', line: oldLines[oi++]! }); ni++;
+    } else {
+      result.push({ type: 'del', line: oldLines[oi++]! });
+      result.push({ type: 'add', line: newLines[ni++]! });
+    }
+  }
+  return result;
+}
+
+// ─── Diff viewer component ────────────────────────────────────────────────────
+
+function DiffViewer({
+  filename,
+  oldContent,
+  newContent,
+  onApply,
+  onCancel,
+}: {
+  filename: string;
+  oldContent: string;
+  newContent: string;
+  onApply: () => void;
+  onCancel: () => void;
+}) {
+  const diff = computeDiff(oldContent, newContent);
+  const adds = diff.filter(l => l.type === 'add').length;
+  const dels = diff.filter(l => l.type === 'del').length;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="rounded overflow-hidden mt-2"
+      style={{ border: '1px solid var(--border)', background: 'var(--bg)' }}
+    >
+      <div className="flex items-center justify-between px-3 py-2" style={{ background: 'var(--surface2)', borderBottom: '1px solid var(--border)' }}>
+        <span className="font-mono text-xs" style={{ color: 'var(--text-dim)' }}>{filename}</span>
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-xs" style={{ color: 'var(--teal)' }}>+{adds}</span>
+          <span className="font-mono text-xs" style={{ color: 'var(--red)' }}>-{dels}</span>
+          <button onClick={onCancel} className="font-mono text-xs px-2 py-0.5 rounded" style={{ background: 'var(--surface)', color: 'var(--text-mute)', border: '1px solid var(--border)' }}>cancel</button>
+          <button onClick={onApply} className="font-mono text-xs px-2 py-0.5 rounded" style={{ background: 'var(--teal-lo)', color: 'var(--teal)', border: '1px solid rgba(29,184,124,0.4)' }}>
+            apply ✓
+          </button>
+        </div>
+      </div>
+      <pre className="overflow-auto max-h-64 text-xs p-2 leading-5" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+        {diff.map((l, i) => (
+          <div
+            key={i}
+            style={{
+              background: l.type === 'add' ? 'rgba(29,184,124,0.1)' : l.type === 'del' ? 'rgba(224,85,85,0.1)' : 'transparent',
+              color: l.type === 'add' ? 'var(--teal)' : l.type === 'del' ? 'var(--red)' : 'var(--text-mute)',
+            }}
+          >
+            <span style={{ userSelect: 'none', opacity: 0.5, marginRight: 8 }}>
+              {l.type === 'add' ? '+' : l.type === 'del' ? '-' : ' '}
+            </span>
+            {l.line}
+          </div>
+        ))}
+      </pre>
+    </motion.div>
+  );
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -539,9 +637,48 @@ export function BrainPage() {
   const [showSlash, setShowSlash] = useState(false);
   const [activeModel, setActiveModel] = useState('default');
   const [showModelPicker, setShowModelPicker] = useState(false);
+  const [diffState, setDiffState] = useState<{
+    msgIdx: number;
+    filename: string;
+    oldContent: string;
+    newContent: string;
+  } | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const config = getConfig();
+
+  const handleApplyFile = useCallback(async (msgIdx: number, filename: string, code: string) => {
+    // Fetch current file content (if exists)
+    let oldContent = '';
+    try {
+      const r = await fetch('/api/files/read', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ filePath: filename }),
+      });
+      if (r.ok) { const d = await r.json(); oldContent = d.content ?? ''; }
+    } catch { /* new file */ }
+    setDiffState({ msgIdx, filename, oldContent, newContent: code });
+  }, []);
+
+  const confirmApply = useCallback(async () => {
+    if (!diffState) return;
+    try {
+      const r = await fetch('/api/files/write', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ filePath: diffState.filename, content: diffState.newContent }),
+      });
+      const d = await r.json();
+      if (d.ok) {
+        setMessages(m => m.map((x, i) => i === diffState.msgIdx
+          ? { ...x, appliedFiles: [...(x.appliedFiles ?? []), diffState.filename] }
+          : x
+        ));
+        setDiffState(null);
+      }
+    } catch { /* show error */ }
+  }, [diffState]);
 
   // Persist messages to localStorage whenever they change
   useEffect(() => {
@@ -1187,11 +1324,12 @@ export function BrainPage() {
           sessionId,
           systemContext: buildSystemContext(ragContext, memoryContext, activeModel),
           history,
+          stream: true,
           ...(activeModel !== 'default' ? { model: activeModel } : {}),
         }),
       });
 
-      if (!res.ok) {
+      if (!res.ok || !res.body) {
         // fallback to old /api/chat if mesh not wired
         const fallback = await fetch('/api/chat', {
           method: 'POST',
@@ -1207,37 +1345,66 @@ export function BrainPage() {
         return;
       }
 
-      const data = await res.json();
-      const content = data.content ?? data.error ?? 'No response.';
-      const hasCodeProposal = detectsCodeProposal(content);
+      // ── Streaming SSE read ──────────────────────────────────────────────
+      // Insert a placeholder message that fills in as chunks arrive
+      let streamIdx = -1;
+      setMessages((m) => {
+        streamIdx = m.length;
+        return [...m, { role: 'assistant' as const, content: '' }];
+      });
+      setIsThinking(false); // hide "routing…" once stream starts
 
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let accumulated = '';
+      let doneMeta: any = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        for (const raw of dec.decode(value).split('\n')) {
+          if (!raw.startsWith('data: ')) continue;
+          try {
+            const ev = JSON.parse(raw.slice(6));
+            if (ev.type === 'chunk') {
+              accumulated += ev.text;
+              setMessages((m) => m.map((x, i) => i === streamIdx ? { ...x, content: accumulated } : x));
+            }
+            if (ev.type === 'done') {
+              doneMeta = ev;
+              accumulated = ev.content ?? accumulated;
+            }
+          } catch { /* skip */ }
+        }
+      }
+
+      const content = accumulated;
+      const hasCodeProposal = detectsCodeProposal(content);
       const newMessages = [...messages, { role: 'user' as const, content: msg }, {
         role: 'assistant' as const,
         content,
-        thinking:      data.thinking,
-        task:          data.task,
-        conductor:     data.conductor,
-        specialist:    data.specialist,
-        executionMode: data.executionMode,
-        stepsLog:      data.stepsLog,
-        isBottleneck:  data.isBottleneck,
-        bottleneck:    data.bottleneck,
+        thinking:      doneMeta?.thinking,
+        task:          doneMeta?.task,
+        conductor:     doneMeta?.conductor,
+        specialist:    doneMeta?.specialist,
+        executionMode: doneMeta?.executionMode,
+        stepsLog:      doneMeta?.stepsLog,
+        isBottleneck:  doneMeta?.isBottleneck,
         hasCodeProposal,
       }];
 
-      setMessages((m) => [...m, {
-        role: 'assistant',
+      setMessages((m) => m.map((x, i) => i === streamIdx ? {
+        ...x,
         content,
-        thinking:      data.thinking,
-        task:          data.task,
-        conductor:     data.conductor,
-        specialist:    data.specialist,
-        executionMode: data.executionMode,
-        stepsLog:      data.stepsLog,
-        isBottleneck:  data.isBottleneck,
-        bottleneck:    data.bottleneck,
+        thinking:      doneMeta?.thinking,
+        task:          doneMeta?.task,
+        conductor:     doneMeta?.conductor,
+        specialist:    doneMeta?.specialist,
+        executionMode: doneMeta?.executionMode,
+        stepsLog:      doneMeta?.stepsLog,
+        isBottleneck:  doneMeta?.isBottleneck,
         hasCodeProposal,
-      }]);
+      } : x));
 
       // Auto-extract memory from conversation every 5 messages (best-effort)
       if (newMessages.filter(m => m.role === 'user').length % 5 === 0 && config?.projectPath) {
@@ -1464,6 +1631,45 @@ export function BrainPage() {
                         : <span className="whitespace-pre-wrap">{msg.content}</span>
                       }
                     </div>
+
+                    {/* Apply-to-file buttons for detected code blocks */}
+                    {msg.role === 'assistant' && (() => {
+                      const blocks = parseCodeBlocks(msg.content).filter(b => b.filename);
+                      if (!blocks.length) return null;
+                      return (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {blocks.map((b, bi) => {
+                            const applied = msg.appliedFiles?.includes(b.filename!);
+                            return (
+                              <button
+                                key={bi}
+                                onClick={() => !applied && handleApplyFile(i, b.filename!, b.code)}
+                                className="font-mono text-xs px-2 py-0.5 rounded transition-all"
+                                style={{
+                                  background: applied ? 'var(--teal-lo)' : 'var(--surface2)',
+                                  color: applied ? 'var(--teal)' : 'var(--text-mute)',
+                                  border: `1px solid ${applied ? 'rgba(29,184,124,0.3)' : 'var(--border)'}`,
+                                  cursor: applied ? 'default' : 'pointer',
+                                }}
+                              >
+                                {applied ? `✓ applied ${b.filename}` : `→ apply ${b.filename}`}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+
+                    {/* Diff viewer */}
+                    {diffState?.msgIdx === i && (
+                      <DiffViewer
+                        filename={diffState.filename}
+                        oldContent={diffState.oldContent}
+                        newContent={diffState.newContent}
+                        onApply={confirmApply}
+                        onCancel={() => setDiffState(null)}
+                      />
+                    )}
 
                     {/* Routing metadata */}
                     {msg.role === 'assistant' && <RoutingBadge msg={msg} />}

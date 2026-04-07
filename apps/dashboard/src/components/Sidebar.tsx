@@ -3,20 +3,21 @@
  * VS Code-style: icon + label, active indicator, bottom status
  */
 
-import { useEffect } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { useEffect, useState } from 'react';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 const NAV = [
-  { to: '/',          icon: '⬡',  label: 'overview',  shortcut: '1' },
-  { to: '/tests',     icon: '⚗',  label: 'tests',     shortcut: '2' },
-  { to: '/security',  icon: '⬡',  label: 'security',  shortcut: '3' },
-  { to: '/monitor',   icon: '◎',  label: 'monitor',   shortcut: '4' },
-  { to: '/brain',     icon: '◈',  label: 'brain',     shortcut: '5' },
-  { to: '/scout',     icon: '◉',  label: 'scout',     shortcut: '6' },
+  { to: '/',          icon: '⬡',  label: 'overview',     shortcut: '1' },
+  { to: '/tests',     icon: '⚗',  label: 'tests',        shortcut: '2' },
+  { to: '/security',  icon: '⬡',  label: 'security',     shortcut: '3' },
+  { to: '/monitor',   icon: '◎',  label: 'monitor',      shortcut: '4' },
+  { to: '/brain',     icon: '◈',  label: 'brain',        shortcut: '5' },
+  { to: '/scout',     icon: '◉',  label: 'scout',        shortcut: '6' },
   { to: '/approvals',    icon: '◇',  label: 'approvals',    shortcut: '7' },
   { to: '/integrations', icon: '⬡',  label: 'integrations', shortcut: '8' },
+  { to: '/memory',    icon: '◎',  label: 'memory',       shortcut: '' },
 ];
 
 const BOTTOM_NAV = [
@@ -40,6 +41,10 @@ const PROVIDER_LABEL: Record<string, string> = {
 interface SidebarProps {
   projectPath?: string;
   llmMode?: string;
+  theme?: 'dark' | 'light';
+  toggleTheme?: () => void;
+  notifUnread?: number;
+  onNotifOpen?: () => void;
 }
 
 interface MeshStatus {
@@ -49,7 +54,7 @@ interface MeshStatus {
   parallel: boolean;
 }
 
-export function Sidebar({ projectPath, llmMode }: SidebarProps) {
+export function Sidebar({ projectPath, llmMode, theme, toggleTheme, notifUnread = 0, onNotifOpen }: SidebarProps) {
   const location = useLocation();
   const qc = useQueryClient();
   const projectName = projectPath
@@ -204,6 +209,37 @@ export function Sidebar({ projectPath, llmMode }: SidebarProps) {
 
       {/* Bottom */}
       <div style={{ borderTop: '1px solid var(--border)' }}>
+        {/* Utility row: notifications + theme toggle */}
+        <div className="flex items-center gap-2 px-4 py-2" style={{ borderBottom: '1px solid var(--border-dim)' }}>
+          {/* Notification bell */}
+          <button
+            onClick={onNotifOpen}
+            className="relative flex items-center gap-1 text-xs font-mono transition-opacity hover:opacity-80 flex-1"
+            style={{ color: 'var(--text-mute)' }}
+            title="Notifications (Alt+N)"
+          >
+            <span>🔔</span>
+            {notifUnread > 0 && (
+              <span
+                className="rounded-full font-mono"
+                style={{ background: 'var(--red)', color: '#fff', fontSize: 9, padding: '1px 4px' }}
+              >
+                {notifUnread > 9 ? '9+' : notifUnread}
+              </span>
+            )}
+            <span style={{ fontSize: 10 }}>notifs</span>
+          </button>
+          {/* Theme toggle */}
+          <button
+            onClick={toggleTheme}
+            className="font-mono text-xs px-1.5 py-0.5 rounded transition-all hover:opacity-80"
+            style={{ color: 'var(--text-mute)', background: 'var(--surface2)', border: '1px solid var(--border)' }}
+            title="Toggle theme"
+          >
+            {theme === 'dark' ? '☀' : '🌙'}
+          </button>
+        </div>
+
         {BOTTOM_NAV.map(({ to, icon, label }) => (
           <NavLink key={to} to={to} className="block">
             {({ isActive }) => (

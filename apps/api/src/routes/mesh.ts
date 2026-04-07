@@ -77,6 +77,37 @@ function ensureMesh(systemContext?: string): LLMesh {
   return mesh;
 }
 
+// ─── SSE streaming helper ────────────────────────────────────────────────────
+
+/** Stream a full text response as SSE word-chunks, then send a done event */
+async function streamSSEResponse(
+  reply: any,
+  content: string,
+  meta: Record<string, unknown>,
+): Promise<void> {
+  reply.raw.setHeader('Content-Type', 'text/event-stream');
+  reply.raw.setHeader('Cache-Control', 'no-cache');
+  reply.raw.setHeader('Connection', 'keep-alive');
+  reply.raw.setHeader('X-Accel-Buffering', 'no');
+
+  const send = (data: object) => {
+    reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  // Stream word by word with a small delay for visual effect
+  const words = content.split(/(\s+)/);
+  let accumulated = '';
+  for (const word of words) {
+    accumulated += word;
+    send({ type: 'chunk', text: word });
+    // Tiny yield so the event loop can flush
+    await new Promise<void>(r => setImmediate(r));
+  }
+
+  send({ type: 'done', content, ...meta });
+  reply.raw.end();
+}
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 export async function meshRoutes(app: FastifyInstance): Promise<void> {
@@ -89,7 +120,8 @@ export async function meshRoutes(app: FastifyInstance): Promise<void> {
       forceTask?: string;
       systemContext?: string;
       history?: Array<{ role: string; content: string }>;
-      model?: string;  // per-request model override, e.g. "groq:deepseek-r1"
+      model?: string;   // per-request model override, e.g. "groq:deepseek-r1"
+      stream?: boolean; // SSE streaming response
     };
   }>(
     '/api/mesh/chat',
@@ -105,12 +137,13 @@ export async function meshRoutes(app: FastifyInstance): Promise<void> {
             systemContext: { type: 'string' },
             history:       { type: 'array' },
             model:         { type: 'string' },
+            stream:        { type: 'boolean' },
           },
         },
       },
     },
     async (req, reply) => {
-      const { prompt, sessionId, systemContext, history, model } = req.body;
+      const { prompt, sessionId, systemContext, history, model, stream } = req.body;
 
       try {
         const sid = sessionId ?? 'default';
@@ -133,15 +166,12 @@ export async function meshRoutes(app: FastifyInstance): Promise<void> {
               ],
               { maxTokens: 2048 },
             );
-            return reply.send({
-              ok: true,
-              content:   ollamaResp.content,
-              task:      'general',
-              conductor: 'direct',
-              specialist: `ollama:${modelId ?? 'default'}`,
-              thinking:  ollamaResp.thinking ?? null,
-              sessionId: sid,
-            });
+            const ollamaMeta = { ok: true, task: 'general', conductor: 'direct', specialist: `ollama:${modelId ?? 'default'}`, thinking: ollamaResp.thinking ?? null, sessionId: sid };
+            if (stream) {
+              await streamSSEResponse(reply, ollamaResp.content, ollamaMeta);
+              return;
+            }
+            return reply.send({ ...ollamaMeta, content: ollamaResp.content });
           }
 
           // Cloud provider override
@@ -164,15 +194,12 @@ export async function meshRoutes(app: FastifyInstance): Promise<void> {
           ];
 
           const resp = await orchestrate(msgs, { maxTokens: 2048 }, overrideCfg);
-          return reply.send({
-            ok: true,
-            content:   resp.content,
-            task:      'general',
-            conductor: 'direct',
-            specialist: model,
-            thinking:  resp.thinking ?? null,
-            sessionId: sid,
-          });
+          const directMeta = { ok: true, task: 'general', conductor: 'direct', specialist: model, thinking: resp.thinking ?? null, sessionId: sid };
+          if (stream) {
+            await streamSSEResponse(reply, resp.content, directMeta);
+            return;
+          }
+          return reply.send({ ...directMeta, content: resp.content });
         }
 
         // ── Normal mesh routing ─────────────────────────────────────────────
@@ -190,9 +217,8 @@ export async function meshRoutes(app: FastifyInstance): Promise<void> {
 
         const response = await mesh.route(prompt);
 
-        return reply.send({
+        const meshMeta = {
           ok: true,
-          content:       response.content,
           task:          response.taskType,
           conductor:     response.conductor,
           specialist:    response.specialist,
@@ -202,7 +228,14 @@ export async function meshRoutes(app: FastifyInstance): Promise<void> {
           executionMode: response.executionMode,
           stepsLog:      response.stepsLog,
           sessionId:     sid,
-        });
+        };
+
+        if (stream) {
+          await streamSSEResponse(reply, response.content, meshMeta);
+          return;
+        }
+
+        return reply.send({ ...meshMeta, content: response.content });
       } catch (err: any) {
         app.log.error(err, '[mesh] chat error');
         return reply.status(500).send({

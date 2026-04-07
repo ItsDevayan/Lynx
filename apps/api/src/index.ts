@@ -35,6 +35,7 @@ import { crawlRoutes } from './routes/crawl.js';
 import { gitRoutes } from './routes/git.js';
 import { integrationsRoutes } from './routes/integrations.js';
 import { memoryRoutes } from './routes/memory.js';
+import { webhooksRoutes } from './routes/webhooks.js';
 
 const PORT = parseInt(process.env.API_PORT ?? '4000', 10);
 const HOST = process.env.API_HOST ?? '0.0.0.0';
@@ -130,6 +131,7 @@ async function start(): Promise<void> {
   await app.register(gitRoutes);
   await app.register(integrationsRoutes);
   await app.register(memoryRoutes);
+  await app.register(webhooksRoutes);
 
   // Run migrations
   await runMigrations();

@@ -7,8 +7,8 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
-import { join, relative, extname } from 'path';
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from 'fs';
+import { join, relative, extname, dirname } from 'path';
 import { spawn } from 'child_process';
 import { execute } from '@lynx/core';
 
@@ -329,6 +329,55 @@ export async function filesRoutes(app: FastifyInstance): Promise<void> {
       }
       const maxDepth = Math.min(5, Math.max(1, parseInt(depth, 10) || 3));
       return reply.send({ path: dirPath, tree: buildTree(dirPath, maxDepth) });
+    },
+  );
+
+  // POST /api/files/write — write (or overwrite) a file
+  app.post<{
+    Body: {
+      filePath: string;
+      content: string;
+      createDirs?: boolean;
+    };
+  }>(
+    '/api/files/write',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['filePath', 'content'],
+          properties: {
+            filePath:   { type: 'string' },
+            content:    { type: 'string' },
+            createDirs: { type: 'boolean' },
+          },
+        },
+      },
+    },
+    async (req, reply) => {
+      const { filePath, content, createDirs = true } = req.body;
+
+      // Safety: only allow writing within paths that look like project files
+      if (filePath.includes('..') || filePath.startsWith('/etc') || filePath.startsWith('/sys')) {
+        return reply.status(400).send({ error: 'Unsafe path' });
+      }
+
+      try {
+        if (createDirs) {
+          mkdirSync(dirname(filePath), { recursive: true });
+        }
+        // Capture old content for response
+        const oldContent = existsSync(filePath) ? readFileSync(filePath, 'utf8') : null;
+        writeFileSync(filePath, content, 'utf8');
+        return reply.send({
+          ok: true,
+          filePath,
+          linesWritten: content.split('\n').length,
+          created: oldContent === null,
+        });
+      } catch (err: any) {
+        return reply.status(500).send({ error: err.message ?? 'Write failed' });
+      }
     },
   );
 }
