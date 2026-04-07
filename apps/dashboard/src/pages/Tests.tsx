@@ -9,6 +9,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -53,6 +54,7 @@ const FRAMEWORK_INFO: Record<string, { icon: string; cmd: string; color: string 
 
 export function TestsPage() {
   const config = getConfig();
+  const navigate = useNavigate();
   const [runLog, setRunLog] = useState<string[]>([]);
   const [runState, setRunState] = useState<'idle' | 'running' | 'pass' | 'fail'>('idle');
 
@@ -237,7 +239,22 @@ export function TestsPage() {
             >
               <span className="font-mono text-xs" style={{ color: 'var(--text-mute)' }}>output</span>
               {runState === 'pass' && <span className="text-xs font-mono" style={{ color: 'var(--teal)' }}>✓ passed</span>}
-              {runState === 'fail' && <span className="text-xs font-mono" style={{ color: 'var(--red)' }}>✗ failed</span>}
+              {runState === 'fail' && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-mono" style={{ color: 'var(--red)' }}>✗ failed</span>
+                  <button
+                    onClick={() => {
+                      const failureLines = runLog.filter(l => l.includes('FAIL') || l.includes('✗') || l.includes('Error') || l.includes('AssertionError')).slice(0, 10).join('\n');
+                      localStorage.setItem('lynx_brain_prefill', `Fix these failing ${framework} tests:\n\n\`\`\`\n${failureLines || runLog.slice(-15).join('\n')}\n\`\`\`\n\nProject: ${config?.projectPath ?? ''}`);
+                      navigate('/brain');
+                    }}
+                    className="text-xs font-mono px-2 py-0.5 rounded transition-all"
+                    style={{ background: 'var(--surface)', color: 'var(--purple-hi)', border: '1px solid rgba(124,111,205,0.3)' }}
+                  >
+                    → fix in Brain
+                  </button>
+                </div>
+              )}
               {runState === 'running' && (
                 <span className="text-xs font-mono animate-pulse" style={{ color: 'var(--amber)' }}>running…</span>
               )}

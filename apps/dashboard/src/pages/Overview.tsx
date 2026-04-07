@@ -120,6 +120,103 @@ const SEV_COLOR: Record<string, string> = {
   FATAL: '#ff3333',
 };
 
+// ─── Mini sparkline ────────────────────────────────────────────────────────────
+
+interface TrendsData {
+  days: number;
+  trends: Record<string, Record<string, number>>;
+}
+
+function Sparkline({ values, color, width = 80, height = 24 }: { values: number[]; color: string; width?: number; height?: number }) {
+  if (values.length < 2) return null;
+  const max = Math.max(...values, 1);
+  const pts = values.map((v, i) => {
+    const x = (i / (values.length - 1)) * width;
+    const y = height - (v / max) * (height - 2) - 1;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  return (
+    <svg width={width} height={height} style={{ display: 'block', overflow: 'visible' }}>
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" opacity={0.8} />
+    </svg>
+  );
+}
+
+function TrendsPanel({ projectId }: { projectId?: string }) {
+  const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}&days=7` : '?days=7';
+  const trends = useQuery<TrendsData>({
+    queryKey: ['monitor-trends', projectId],
+    queryFn: () => fetch(`/api/monitor/trends${qs}`).then(r => r.json()),
+    refetchInterval: 60_000,
+    retry: false,
+  });
+
+  const data = trends.data?.trends ?? {};
+  const days = [...Array(7)].map((_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (6 - i));
+    return d.toISOString().slice(0, 10);
+  });
+  const errorValues = days.map(d => data[d]?.ERROR ?? data[d]?.FATAL ?? 0);
+  const warnValues  = days.map(d => data[d]?.WARN ?? 0);
+  const hasData = errorValues.some(v => v > 0) || warnValues.some(v => v > 0);
+
+  if (!hasData && !trends.isLoading) return null;
+
+  return (
+    <motion.div
+      className="rounded p-4 mb-4"
+      style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ delay: 0.28 }}
+    >
+      <p className="section-title mb-3">error trends · 7d</p>
+      {trends.isLoading ? (
+        <div className="h-6 shimmer rounded" style={{ width: 200 }} />
+      ) : (
+        <div className="flex items-end gap-6">
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <Sparkline values={errorValues} color="var(--red)" />
+              <span className="text-xs font-mono" style={{ color: 'var(--red)' }}>errors</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Sparkline values={warnValues} color="var(--amber)" />
+              <span className="text-xs font-mono" style={{ color: 'var(--amber)' }}>warnings</span>
+            </div>
+          </div>
+          <div className="ml-auto flex gap-1 items-end" style={{ height: 28 }}>
+            {days.map((d, i) => {
+              const total = errorValues[i]! + warnValues[i]!;
+              const h = total > 0 ? Math.max(3, Math.min(24, (total / Math.max(...errorValues.map((v, j) => v + warnValues[j]!), 1)) * 24)) : 2;
+              return (
+                <div
+                  key={d}
+                  title={`${d}: ${errorValues[i]} errors, ${warnValues[i]} warnings`}
+                  style={{
+                    width: 8,
+                    height: h,
+                    borderRadius: 2,
+                    background: errorValues[i]! > 0 ? 'var(--red)' : warnValues[i]! > 0 ? 'var(--amber)' : 'var(--border)',
+                    opacity: 0.7,
+                    alignSelf: 'flex-end',
+                  }}
+                />
+              );
+            })}
+          </div>
+          <div className="text-right">
+            <p className="font-mono text-xs" style={{ color: 'var(--text-mute)' }}>
+              {days[0]?.slice(5)} → {days[6]?.slice(5)}
+            </p>
+          </div>
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
 function ConnectedDashboard({ config }: { config: LynxConfig }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -267,6 +364,9 @@ function ConnectedDashboard({ config }: { config: LynxConfig }) {
           ))}
         </div>
       </motion.div>
+
+      {/* Error trends sparkline */}
+      <TrendsPanel projectId={config.projectPath} />
 
       {/* Bottom row: recent errors + pending approvals */}
       <div className="grid grid-cols-2 gap-4 mb-4">

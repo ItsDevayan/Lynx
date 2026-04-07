@@ -33,6 +33,8 @@ const SEV: Record<string, { bg: string; fg: string; border: string }> = {
 export function MonitorPage() {
   const qc = useQueryClient();
   const [liveFlash, setLiveFlash] = useState(false);
+  const [search, setSearch] = useState('');
+  const [sevFilter, setSevFilter] = useState<string>('');
 
   // Instant re-fetch when ingest broadcasts new errors via WebSocket
   useEffect(() => {
@@ -65,7 +67,16 @@ export function MonitorPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['trackers'] }),
   });
 
-  const trackers = data?.trackers ?? [];
+  const allTrackers = data?.trackers ?? [];
+  const trackers = allTrackers.filter(t => {
+    const matchesSev = !sevFilter || t.severity === sevFilter;
+    const q = search.toLowerCase();
+    const matchesSearch = !search
+      || t.errorName.toLowerCase().includes(q)
+      || t.sampleMessage?.toLowerCase().includes(q)
+      || t.layer?.toLowerCase().includes(q);
+    return matchesSev && matchesSearch;
+  });
 
   return (
     <div className="p-6 max-w-5xl">
@@ -93,6 +104,35 @@ export function MonitorPage() {
             )}
           </AnimatePresence>
           <span className="badge badge-info">{trackers.length} unresolved</span>
+        </div>
+      </div>
+
+      {/* Search + severity filter */}
+      <div className="flex items-center gap-2 mb-4">
+        <input
+          type="text"
+          placeholder="search errors…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="text-xs font-mono px-3 py-1.5 rounded flex-1"
+          style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', outline: 'none', maxWidth: 280 }}
+        />
+        <div className="flex gap-1">
+          {['', 'FATAL', 'ERROR', 'WARN', 'INFO'].map(sev => (
+            <button
+              key={sev}
+              onClick={() => setSevFilter(sev)}
+              className="text-xs font-mono px-2 py-1 rounded transition-all"
+              style={{
+                background: sevFilter === sev ? 'var(--overlay)' : 'transparent',
+                color: sev === '' ? (sevFilter === '' ? 'var(--text)' : 'var(--text-mute)')
+                  : (SEV[sev]?.fg ?? 'var(--text-mute)'),
+                border: `1px solid ${sevFilter === sev ? 'var(--border-lit)' : 'transparent'}`,
+              }}
+            >
+              {sev || 'all'}
+            </button>
+          ))}
         </div>
       </div>
 

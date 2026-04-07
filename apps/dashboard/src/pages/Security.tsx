@@ -11,6 +11,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useQuery } from '@tanstack/react-query';
 import { formatDistanceToNow } from 'date-fns';
+import { useNavigate } from 'react-router-dom';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -96,8 +97,14 @@ function loadCachedScan(): ScanResult | null {
   } catch { return null; }
 }
 
+function fixInBrain(prompt: string, navigate: ReturnType<typeof useNavigate>) {
+  localStorage.setItem('lynx_brain_prefill', prompt);
+  navigate('/brain');
+}
+
 export function SecurityPage() {
   const config = getConfig();
+  const navigate = useNavigate();
   const [scanning, setScanning] = useState(false);
   const [result, setResult] = useState<ScanResult | null>(loadCachedScan);
   const [scanError, setScanError] = useState('');
@@ -280,6 +287,16 @@ export function SecurityPage() {
                     <p className="text-xs mt-0.5" style={{ color: 'var(--text-dim)' }}>{cve.title}</p>
                     <p className="text-xs font-mono mt-0.5" style={{ color: 'var(--text-mute)' }}>{cve.cveId}{cve.fixedVersion ? ` · fix: ${cve.fixedVersion}` : ''}</p>
                   </div>
+                  <button
+                    onClick={() => fixInBrain(
+                      `Fix the ${cve.severity} CVE in ${cve.packageName}@${cve.installedVersion}: ${cve.title} (${cve.cveId}).${cve.fixedVersion ? ` Upgrade to ${cve.fixedVersion}.` : ''} Show me the exact command and any code changes needed.`,
+                      navigate
+                    )}
+                    className="text-xs font-mono px-2 py-1 rounded flex-shrink-0 transition-all"
+                    style={{ background: 'var(--surface2)', color: 'var(--purple-hi)', border: '1px solid rgba(124,111,205,0.3)' }}
+                  >
+                    → fix in Brain
+                  </button>
                 </motion.div>
               ))}
             </motion.div>
@@ -313,6 +330,16 @@ export function SecurityPage() {
                     <p className="text-xs mt-0.5" style={{ color: 'var(--text-dim)' }}>{s.message}</p>
                     <p className="text-xs font-mono mt-0.5" style={{ color: 'var(--text-mute)' }}>{s.ruleId}</p>
                   </div>
+                  <button
+                    onClick={() => fixInBrain(
+                      `Fix the SAST finding in ${s.file}:${s.line}: ${s.message} (rule: ${s.ruleId}). Show me the exact code change needed to resolve this.`,
+                      navigate
+                    )}
+                    className="text-xs font-mono px-2 py-1 rounded flex-shrink-0 transition-all"
+                    style={{ background: 'var(--surface2)', color: 'var(--purple-hi)', border: '1px solid rgba(124,111,205,0.3)' }}
+                  >
+                    → fix in Brain
+                  </button>
                 </motion.div>
               ))}
             </motion.div>

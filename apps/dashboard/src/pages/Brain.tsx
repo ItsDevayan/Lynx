@@ -399,6 +399,16 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: 'Switch the active model for this conversation',
     expand: () => '/model ',
   },
+  {
+    cmd: '/review',
+    description: 'Code review of current git diff',
+    expand: (p) => `/review ${p ?? ''}`,
+  },
+  {
+    cmd: '/export',
+    description: 'Export this conversation as markdown',
+    expand: () => '/export',
+  },
 ];
 
 function SlashMenu({
@@ -684,6 +694,16 @@ export function BrainPage() {
   useEffect(() => {
     try { localStorage.setItem(HISTORY_KEY, JSON.stringify(messages.slice(-60))); } catch { /* quota */ }
   }, [messages]);
+
+  // Read prefill from other pages (Security → fix, Tests → fix)
+  useEffect(() => {
+    const prefill = localStorage.getItem('lynx_brain_prefill');
+    if (prefill) {
+      localStorage.removeItem('lynx_brain_prefill');
+      setInput(prefill);
+      setTimeout(() => inputRef.current?.focus(), 100);
+    }
+  }, []);
 
   const sendForApproval = useCallback(async (msgIdx: number, userPrompt: string) => {
     const msg = messages[msgIdx];
@@ -1215,6 +1235,82 @@ export function BrainPage() {
           content: `Unknown model \`${modelArg}\`. Use \`/model\` to list available models.`,
         }]);
       }
+      setIsThinking(false);
+      return;
+    }
+
+    // ── /review — code review of current git diff ────────────────────────
+    if ((msg === '/review' || msg.startsWith('/review ')) && config?.projectPath) {
+      const targetPath = msg.replace('/review', '').trim() || config.projectPath;
+      setMessages(m => [...m, { role: 'assistant', content: '**Code review** · fetching diff…', task: 'code-hard', specialist: 'reviewer' }]);
+      const reviewMsgIdx = messages.length;
+      try {
+        const diffRes = await fetch(`/api/git/diff?projectPath=${encodeURIComponent(targetPath)}`);
+        const diffData = diffRes.ok ? await diffRes.json() : null;
+        const diff = diffData?.diff ?? '';
+        if (!diff || diff.trim().length < 10) {
+          setMessages(m => m.map((x, i) => i === reviewMsgIdx ? { ...x, content: '**Code review** · nothing to review (working tree is clean).' } : x));
+          setIsThinking(false);
+          return;
+        }
+        const [ragCtx, memCtx] = await Promise.all([fetchRagContext(diff.slice(0, 500)), fetchMemoryContext()]);
+        const reviewPrompt = `You are a senior software engineer doing a structured code review. Review the following git diff carefully.\n\nFor each change, check:\n1. Correctness — will it break anything?\n2. Security — any injection, auth, secret exposure risks?\n3. Performance — any O(n²), unnecessary allocations, blocking calls?\n4. Readability — naming, complexity, missing comments?\n5. Test coverage — should there be tests for this?\n\nFormat your response as:\n- **[CRITICAL]** for must-fix issues\n- **[WARN]** for should-fix issues\n- **[NOTE]** for suggestions\n- End with a one-line verdict: ✓ Ready / ⚠ Needs changes / ✗ Block\n\n\`\`\`diff\n${diff.slice(0, 4000)}\n\`\`\``;
+        const res = await fetch('/api/mesh/chat', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            prompt: reviewPrompt,
+            sessionId,
+            systemContext: buildSystemContext(ragCtx, memCtx, activeModel),
+            stream: true,
+            ...(activeModel !== 'default' ? { model: activeModel } : {}),
+          }),
+        });
+        if (!res.ok || !res.body) {
+          setMessages(m => m.map((x, i) => i === reviewMsgIdx ? { ...x, content: 'Review failed — mesh not available.' } : x));
+          setIsThinking(false);
+          return;
+        }
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        let accumulated = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          for (const raw of dec.decode(value).split('\n')) {
+            if (!raw.startsWith('data: ')) continue;
+            try {
+              const ev = JSON.parse(raw.slice(6));
+              if (ev.type === 'chunk') { accumulated += ev.text; setMessages(m => m.map((x, i) => i === reviewMsgIdx ? { ...x, content: `**Code review**\n\n${accumulated}` } : x)); }
+              if (ev.type === 'done') accumulated = ev.content ?? accumulated;
+            } catch { /* skip */ }
+          }
+        }
+        setMessages(m => m.map((x, i) => i === reviewMsgIdx ? { ...x, content: `**Code review**\n\n${accumulated}`, task: 'code-hard', specialist: 'reviewer' } : x));
+      } catch {
+        setMessages(m => m.map((x, i) => i === reviewMsgIdx ? { ...x, content: 'Review failed.' } : x));
+      }
+      setIsThinking(false);
+      return;
+    }
+
+    // ── /export — download conversation as markdown ───────────────────────
+    if (msg === '/export') {
+      const lines = [`# Lynx Brain — ${new Date().toLocaleString()}\n`];
+      for (const m of messages) {
+        if (m.role === 'system') continue;
+        lines.push(`## ${m.role === 'user' ? 'You' : 'Lynx'}\n`);
+        lines.push(m.content);
+        lines.push('');
+      }
+      const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `lynx-brain-${Date.now()}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setMessages(m => [...m, { role: 'assistant', content: '**Exported** · conversation saved as markdown ✓' }]);
       setIsThinking(false);
       return;
     }
