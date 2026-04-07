@@ -36,3 +36,6 @@ coverage/
 
 # OS
 Thumbs.db
+
+# Claude Code session data (not for public repo)
+.claude/
