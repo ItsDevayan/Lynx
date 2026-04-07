@@ -17,6 +17,9 @@ import {
   clearSession,
   LLMesh,
   recommendBundle,
+  getLLMConfig,
+  orchestrate,
+  execute,
   type MeshMessage,
 } from '@lynx/core';
 import { existsSync, readFileSync } from 'fs';
@@ -86,6 +89,7 @@ export async function meshRoutes(app: FastifyInstance): Promise<void> {
       forceTask?: string;
       systemContext?: string;
       history?: Array<{ role: string; content: string }>;
+      model?: string;  // per-request model override, e.g. "groq:deepseek-r1"
     };
   }>(
     '/api/mesh/chat',
@@ -100,16 +104,79 @@ export async function meshRoutes(app: FastifyInstance): Promise<void> {
             forceTask:     { type: 'string' },
             systemContext: { type: 'string' },
             history:       { type: 'array' },
+            model:         { type: 'string' },
           },
         },
       },
     },
     async (req, reply) => {
-      const { prompt, sessionId, systemContext, history } = req.body;
+      const { prompt, sessionId, systemContext, history, model } = req.body;
 
       try {
+        const sid = sessionId ?? 'default';
+
+        // ── Per-request model override ──────────────────────────────────────
+        // When the user picks a specific model in Brain, bypass the global mesh
+        // conductor and route directly to that provider.
+        if (model && model !== 'default') {
+          const [provider, modelId] = model.split(':') as [string, string | undefined];
+          const baseCfg = getLLMConfig();
+
+          let overrideCfg: Parameters<typeof orchestrate>[2];
+          if (provider === 'ollama') {
+            // Use executor directly for Ollama models
+            const ollamaResp = await execute(
+              [
+                ...(systemContext ? [{ role: 'system' as const, content: systemContext }] : []),
+                ...( history ?? []).slice(-10).map(h => ({ role: h.role as 'user' | 'assistant', content: h.content })),
+                { role: 'user' as const, content: prompt },
+              ],
+              { maxTokens: 2048 },
+            );
+            return reply.send({
+              ok: true,
+              content:   ollamaResp.content,
+              task:      'general',
+              conductor: 'direct',
+              specialist: `ollama:${modelId ?? 'default'}`,
+              thinking:  ollamaResp.thinking ?? null,
+              sessionId: sid,
+            });
+          }
+
+          // Cloud provider override
+          overrideCfg = {
+            orchestrator: {
+              provider:     provider as any,
+              groqModel:    provider === 'groq'       ? modelId : baseCfg.orchestrator.groqModel,
+              claudeModel:  provider === 'claude-api' ? modelId : baseCfg.orchestrator.claudeModel,
+              openaiModel:  provider === 'openai'     ? modelId : baseCfg.orchestrator.openaiModel,
+              groqApiKey:   baseCfg.orchestrator.groqApiKey   ?? baseCfg.groqApiKey,
+              anthropicApiKey: baseCfg.orchestrator.anthropicApiKey ?? baseCfg.anthropicApiKey,
+              openaiApiKey: baseCfg.orchestrator.openaiApiKey ?? baseCfg.openaiApiKey,
+            },
+          };
+
+          const msgs = [
+            ...(systemContext ? [{ role: 'system' as const, content: systemContext }] : []),
+            ...(history ?? []).slice(-10).map(h => ({ role: h.role as 'user' | 'assistant', content: h.content })),
+            { role: 'user' as const, content: prompt },
+          ];
+
+          const resp = await orchestrate(msgs, { maxTokens: 2048 }, overrideCfg);
+          return reply.send({
+            ok: true,
+            content:   resp.content,
+            task:      'general',
+            conductor: 'direct',
+            specialist: model,
+            thinking:  resp.thinking ?? null,
+            sessionId: sid,
+          });
+        }
+
+        // ── Normal mesh routing ─────────────────────────────────────────────
         const mesh = ensureMesh(systemContext);
-        const sid  = sessionId ?? 'default';
 
         // Seed history into session memory if provided
         if (history && history.length > 0) {

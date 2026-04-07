@@ -1,5 +1,63 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+
+// ─── Lightweight markdown renderer ───────────────────────────────────────────
+// Handles: **bold**, *italic*, `code`, ```blocks```, ## headers, - lists, links
+
+function renderMarkdown(text: string): React.ReactNode[] {
+  // Split into code blocks first to avoid processing their content
+  const segments = text.split(/(```[\w]*\n[\s\S]*?```)/g);
+  return segments.map((seg, si) => {
+    if (seg.startsWith('```')) {
+      const langMatch = seg.match(/^```(\w*)\n/);
+      const lang = langMatch?.[1] ?? '';
+      const code = seg.replace(/^```\w*\n/, '').replace(/```$/, '');
+      return (
+        <pre
+          key={si}
+          className="rounded p-3 my-2 overflow-x-auto text-xs leading-relaxed"
+          style={{ background: 'var(--bg)', border: '1px solid var(--border)', fontFamily: 'JetBrains Mono, monospace', color: 'var(--text-dim)' }}
+        >
+          {lang && <span style={{ color: 'var(--text-mute)', fontSize: 10 }}>{lang}\n</span>}
+          {code}
+        </pre>
+      );
+    }
+    // Process inline content line by line
+    const lines = seg.split('\n');
+    return (
+      <span key={si}>
+        {lines.map((line, li) => {
+          const isH2 = line.startsWith('## ');
+          const isH3 = line.startsWith('### ');
+          const isBullet = /^\s*[-*]\s/.test(line);
+          const content = isH2 ? line.slice(3) : isH3 ? line.slice(4) : isBullet ? line.replace(/^\s*[-*]\s/, '') : line;
+
+          const inlineNodes = renderInline(content);
+
+          if (isH2) return <p key={li} className="font-semibold mt-3 mb-1 text-xs" style={{ color: 'var(--text)' }}>{inlineNodes}</p>;
+          if (isH3) return <p key={li} className="font-semibold mt-2 mb-0.5 text-xs" style={{ color: 'var(--text-dim)' }}>{inlineNodes}</p>;
+          if (isBullet) return <div key={li} className="flex gap-1.5 text-xs my-0.5"><span style={{ color: 'var(--purple)', flexShrink: 0 }}>·</span><span>{inlineNodes}</span></div>;
+          if (line === '') return <br key={li} />;
+          return <span key={li}>{inlineNodes}{li < lines.length - 1 ? '\n' : ''}</span>;
+        })}
+      </span>
+    );
+  });
+}
+
+function renderInline(text: string): React.ReactNode[] {
+  // Split on bold, italic, inline code, links
+  const parts = text.split(/(\*\*[\s\S]+?\*\*|\*[\s\S]+?\*|`[^`]+`|\[.+?\]\(.+?\))/g);
+  return parts.map((p, i) => {
+    if (p.startsWith('**') && p.endsWith('**')) return <strong key={i} style={{ color: 'var(--text)' }}>{p.slice(2, -2)}</strong>;
+    if (p.startsWith('*') && p.endsWith('*')) return <em key={i} style={{ color: 'var(--text-dim)' }}>{p.slice(1, -1)}</em>;
+    if (p.startsWith('`') && p.endsWith('`')) return <code key={i} className="rounded px-1" style={{ background: 'var(--surface2)', color: 'var(--purple-hi)', fontSize: '0.9em', fontFamily: 'JetBrains Mono, monospace' }}>{p.slice(1, -1)}</code>;
+    const linkMatch = p.match(/^\[(.+?)\]\((.+?)\)$/);
+    if (linkMatch) return <a key={i} href={linkMatch[2]} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--teal)', textDecoration: 'underline' }}>{linkMatch[1]}</a>;
+    return p;
+  });
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -120,12 +178,43 @@ const TASK_LABEL: Record<string, string> = {
   bottleneck:   'bottleneck',
 };
 
-const SUGGESTIONS = [
-  'What are the most critical errors in my codebase right now?',
-  'Explain the architecture of this project',
-  'Which dependencies have known CVEs?',
-  'Write a test for the ingest endpoint',
-  'What should I refactor first?',
+const SUGGESTION_GROUPS = [
+  {
+    label: 'understand',
+    color: 'var(--teal)',
+    items: [
+      'Explain the architecture of this project',
+      'How does data flow from ingest to the dashboard?',
+      'What are the most complex files in this codebase?',
+    ],
+  },
+  {
+    label: 'code',
+    color: 'var(--purple-hi)',
+    items: [
+      'Write a test for the ingest endpoint',
+      'Refactor the largest function you can find',
+      'Add error handling to all API routes that are missing it',
+    ],
+  },
+  {
+    label: 'security',
+    color: 'var(--amber)',
+    items: [
+      'Which dependencies have known CVEs?',
+      'Check for exposed secrets or hardcoded credentials',
+      'Review authentication and session handling',
+    ],
+  },
+  {
+    label: 'ops',
+    color: 'var(--text-dim)',
+    items: [
+      'What are the most critical errors right now?',
+      'What should I refactor first for performance?',
+      "What's changed in the last 5 commits?",
+    ],
+  },
 ];
 
 // ─── Slash commands ───────────────────────────────────────────────────────────
@@ -429,8 +518,20 @@ function ModelSuggestionChip({
   );
 }
 
+const HISTORY_KEY = 'lynx_brain_history';
+
+function loadHistory(): Message[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as Message[];
+    // Keep last 60 messages to avoid bloat
+    return Array.isArray(parsed) ? parsed.slice(-60) : [];
+  } catch { return []; }
+}
+
 export function BrainPage() {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(loadHistory);
   const [input, setInput] = useState('');
   const [isThinking, setIsThinking] = useState(false);
   const [expandedThinking, setExpandedThinking] = useState<number | null>(null);
@@ -441,6 +542,11 @@ export function BrainPage() {
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const config = getConfig();
+
+  // Persist messages to localStorage whenever they change
+  useEffect(() => {
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(messages.slice(-60))); } catch { /* quota */ }
+  }, [messages]);
 
   const sendForApproval = useCallback(async (msgIdx: number, userPrompt: string) => {
     const msg = messages[msgIdx];
@@ -467,6 +573,25 @@ export function BrainPage() {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isThinking]);
+
+  // HITL approval/rejection listener — update message status when approved in the Approvals page
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const msg = (e as CustomEvent).detail;
+      if (!msg?.data?.id) return;
+      if (msg.type === 'hitl:applied') {
+        setMessages(m => m.map(x =>
+          x.hitlId === msg.data.id ? { ...x, hitlStatus: 'approved' } : x
+        ));
+      } else if (msg.type === 'hitl:rejected') {
+        setMessages(m => m.map(x =>
+          x.hitlId === msg.data.id ? { ...x, hitlStatus: 'rejected' } : x
+        ));
+      }
+    };
+    window.addEventListener('lynx:ws', handler);
+    return () => window.removeEventListener('lynx:ws', handler);
+  }, []);
 
   // Fetch shared project memory context
   const fetchMemoryContext = async (): Promise<string> => {
@@ -1166,6 +1291,20 @@ export function BrainPage() {
               ⚙ {executorLabel}
             </span>
           )}
+          {/* Clear history */}
+          {messages.length > 0 && (
+            <button
+              className="badge text-xs font-mono cursor-pointer transition-opacity hover:opacity-80"
+              style={{ background: 'var(--surface2)', color: 'var(--text-mute)', border: '1px solid var(--border)' }}
+              title="Clear conversation history"
+              onClick={() => {
+                setMessages([]);
+                localStorage.removeItem(HISTORY_KEY);
+              }}
+            >
+              ✕ clear
+            </button>
+          )}
           {/* Model switcher */}
           <div className="relative">
             <button
@@ -1228,32 +1367,44 @@ export function BrainPage() {
             </div>
             <h2 className="font-semibold mb-1">Ask me anything</h2>
             <p className="text-xs mb-2 text-center max-w-xs" style={{ color: 'var(--text-dim)' }}>
-              I route each task to the right specialist — reasoner, coder, or general — and always show you the routing trace.
+              Each task is routed to the right specialist — reasoner, coder, or general — with full trace.
             </p>
             {config?.projectPath && (
-              <p className="text-xs mb-8 font-mono" style={{ color: 'var(--text-mute)' }}>
+              <p className="text-xs mb-6 font-mono" style={{ color: 'var(--text-mute)' }}>
                 ◦ {config.projectPath.split('/').filter(Boolean).pop() ?? config.projectPath}
               </p>
             )}
-            <div className="w-full max-w-xl space-y-1.5">
-              {SUGGESTIONS.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => send(s)}
-                  className="w-full text-left px-4 py-2.5 rounded text-xs transition-all"
-                  style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-dim)' }}
-                  onMouseEnter={e => {
-                    (e.currentTarget as HTMLElement).style.borderColor = 'var(--purple)';
-                    (e.currentTarget as HTMLElement).style.color = 'var(--text)';
-                  }}
-                  onMouseLeave={e => {
-                    (e.currentTarget as HTMLElement).style.borderColor = 'var(--border)';
-                    (e.currentTarget as HTMLElement).style.color = 'var(--text-dim)';
-                  }}
-                >
-                  <span className="font-mono mr-2" style={{ color: 'var(--purple)' }}>→</span>
-                  {s}
-                </button>
+            <div className="w-full max-w-2xl space-y-4">
+              {SUGGESTION_GROUPS.map((group) => (
+                <div key={group.label}>
+                  <p
+                    className="text-xs font-mono mb-2 uppercase tracking-widest"
+                    style={{ color: group.color, fontSize: 10 }}
+                  >
+                    {group.label}
+                  </p>
+                  <div className="space-y-1.5">
+                    {group.items.map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => send(s)}
+                        className="w-full text-left px-4 py-2.5 rounded text-xs transition-all"
+                        style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-dim)' }}
+                        onMouseEnter={e => {
+                          (e.currentTarget as HTMLElement).style.borderColor = group.color;
+                          (e.currentTarget as HTMLElement).style.color = 'var(--text)';
+                        }}
+                        onMouseLeave={e => {
+                          (e.currentTarget as HTMLElement).style.borderColor = 'var(--border)';
+                          (e.currentTarget as HTMLElement).style.color = 'var(--text-dim)';
+                        }}
+                      >
+                        <span className="font-mono mr-2" style={{ color: group.color }}>→</span>
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           </div>
@@ -1307,7 +1458,12 @@ export function BrainPage() {
                       )}
                     </AnimatePresence>
 
-                    <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                    <div className="leading-relaxed text-xs">
+                      {msg.role === 'assistant'
+                        ? renderMarkdown(msg.content)
+                        : <span className="whitespace-pre-wrap">{msg.content}</span>
+                      }
+                    </div>
 
                     {/* Routing metadata */}
                     {msg.role === 'assistant' && <RoutingBadge msg={msg} />}
@@ -1361,6 +1517,14 @@ export function BrainPage() {
                             style={{ background: 'var(--amber-lo)', color: 'var(--amber)', border: '1px solid rgba(212,160,23,0.3)' }}
                           >
                             ⏳ pending approval · {msg.hitlId.slice(-8)}
+                          </span>
+                        ) : msg.hitlStatus === 'approved' ? (
+                          <span className="font-mono text-xs px-2 py-0.5 rounded" style={{ background: 'var(--teal-lo)', color: 'var(--teal)', border: '1px solid rgba(29,184,124,0.3)' }}>
+                            ✓ approved
+                          </span>
+                        ) : msg.hitlStatus === 'rejected' ? (
+                          <span className="font-mono text-xs px-2 py-0.5 rounded" style={{ background: 'var(--red-lo)', color: 'var(--red)', border: '1px solid rgba(224,85,85,0.3)' }}>
+                            ✗ rejected
                           </span>
                         ) : msg.hitlStatus === 'pending' ? (
                           <span className="font-mono text-xs" style={{ color: 'var(--text-mute)' }}>sending…</span>
@@ -1433,11 +1597,16 @@ export function BrainPage() {
           />
           <span className="text-xs font-mono" style={{ color: 'var(--text-mute)' }}>↵</span>
         </div>
-        <p className="text-xs mt-1.5 font-mono" style={{ color: 'var(--text-mute)' }}>
-          session · {sessionId.slice(-8)} · {messages.filter(m => m.role !== 'system').length} msgs
-          {' · '}
-          <span style={{ opacity: 0.5 }}>/ for commands</span>
-        </p>
+        <div className="flex items-center gap-3 mt-1.5">
+          <p className="text-xs font-mono flex-1" style={{ color: 'var(--text-mute)' }}>
+            session · {sessionId.slice(-8)} · {messages.filter(m => m.role !== 'system').length} msgs
+            {' · '}
+            <span style={{ opacity: 0.5 }}>/ for commands</span>
+          </p>
+          <span className="text-xs font-mono" style={{ color: activeModel !== 'default' ? 'var(--amber)' : 'var(--text-mute)', fontSize: 10 }}>
+            model: {activeModel}
+          </span>
+        </div>
       </div>
     </div>
   );

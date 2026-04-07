@@ -110,6 +110,8 @@ export function SettingsPage() {
 
   const handleSave = async () => {
     saveConfig(config);
+    // Notify App.tsx so the sidebar + statusbar update immediately
+    window.dispatchEvent(new CustomEvent('lynx:config-changed', { detail: config }));
     // Persist to backend config file
     try {
       await fetch('/api/setup/config', {

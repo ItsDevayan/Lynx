@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls e:/work/open-source/lynx/*.md)",
+      "Bash(npx tsc:*)"
+    ]
+  }
+}

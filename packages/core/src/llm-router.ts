@@ -142,25 +142,29 @@ export function getLLMConfig(): LLMConfig { return cfg; }
 export async function orchestrate(
   messages: LLMMessage[],
   opts: LLMRequestOptions = {},
+  overrideCfg?: Partial<LLMConfig>,
 ): Promise<LLMResponse> {
-  const o = cfg.orchestrator;
+  const resolved = overrideCfg
+    ? { ...cfg, orchestrator: { ...cfg.orchestrator, ...(overrideCfg.orchestrator ?? {}) }, executor: { ...cfg.executor, ...(overrideCfg.executor ?? {}) } }
+    : cfg;
+  const o = resolved.orchestrator;
 
   try {
     switch (o.provider) {
       case 'groq': {
-        const key = o.groqApiKey ?? cfg.groqApiKey;
+        const key = o.groqApiKey ?? resolved.groqApiKey;
         if (!key) throw new Error('No Groq API key');
         return await groqChat(messages, opts, key, o.groqModel);
       }
       case 'claude-api': {
-        const key = o.anthropicApiKey ?? cfg.anthropicApiKey;
+        const key = o.anthropicApiKey ?? resolved.anthropicApiKey;
         if (!key) throw new Error('No Anthropic API key');
         return await claudeApiChat(messages, opts, key, o.claudeModel);
       }
       case 'claude-cli':
         return await claudeCliChat(messages, opts);
       case 'openai': {
-        const key = o.openaiApiKey ?? cfg.openaiApiKey;
+        const key = o.openaiApiKey ?? resolved.openaiApiKey;
         if (!key) throw new Error('No OpenAI API key');
         return await openaiChat(messages, opts, key, o.openaiModel);
       }

@@ -10,6 +10,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useQuery } from '@tanstack/react-query';
+import { formatDistanceToNow } from 'date-fns';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -86,10 +87,19 @@ function SeverityBadge({ sev }: { sev: string }) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
+const SCAN_CACHE_KEY = 'lynx_security_scan';
+
+function loadCachedScan(): ScanResult | null {
+  try {
+    const s = localStorage.getItem(SCAN_CACHE_KEY);
+    return s ? JSON.parse(s) : null;
+  } catch { return null; }
+}
+
 export function SecurityPage() {
   const config = getConfig();
   const [scanning, setScanning] = useState(false);
-  const [result, setResult] = useState<ScanResult | null>(null);
+  const [result, setResult] = useState<ScanResult | null>(loadCachedScan);
   const [scanError, setScanError] = useState('');
   const [tab, setTab] = useState<'cve' | 'sast'>('cve');
 
@@ -122,6 +132,7 @@ export function SecurityPage() {
 
       const data: ScanResult = await r.json();
       setResult(data);
+      try { localStorage.setItem(SCAN_CACHE_KEY, JSON.stringify(data)); } catch { /* quota */ }
     } catch {
       setScanError(
         'Security scan API not available.\n\n' +
@@ -152,16 +163,23 @@ export function SecurityPage() {
         </div>
         <div className="flex items-center gap-2">
           {result && (
-            <span
-              className="badge text-xs font-mono"
-              style={{
-                background: criticalCount > 0 || highCount > 0 ? 'var(--red-lo)' : 'var(--teal-lo)',
-                color: criticalCount > 0 || highCount > 0 ? 'var(--red)' : 'var(--teal)',
-                border: `1px solid ${criticalCount > 0 || highCount > 0 ? 'rgba(224,85,85,0.3)' : 'rgba(29,184,124,0.3)'}`,
-              }}
-            >
-              {criticalCount + highCount > 0 ? `${criticalCount + highCount} critical/high` : '✓ clean'}
-            </span>
+            <>
+              {result.scannedAt && (
+                <span className="text-xs font-mono" style={{ color: 'var(--text-mute)' }}>
+                  {formatDistanceToNow(new Date(result.scannedAt), { addSuffix: true })}
+                </span>
+              )}
+              <span
+                className="badge text-xs font-mono"
+                style={{
+                  background: criticalCount > 0 || highCount > 0 ? 'var(--red-lo)' : 'var(--teal-lo)',
+                  color: criticalCount > 0 || highCount > 0 ? 'var(--red)' : 'var(--teal)',
+                  border: `1px solid ${criticalCount > 0 || highCount > 0 ? 'rgba(224,85,85,0.3)' : 'rgba(29,184,124,0.3)'}`,
+                }}
+              >
+                {criticalCount + highCount > 0 ? `${criticalCount + highCount} critical/high` : '✓ clean'}
+              </span>
+            </>
           )}
           <button
             className="btn btn-primary text-xs"

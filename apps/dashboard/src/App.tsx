@@ -58,6 +58,16 @@ export default function App() {
     setPhase('provisioning');
   };
 
+  // Live config updates from Settings page — no reload needed
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const updated = (e as CustomEvent<LynxConfig>).detail;
+      if (updated) setConfig(updated);
+    };
+    window.addEventListener('lynx:config-changed', handler);
+    return () => window.removeEventListener('lynx:config-changed', handler);
+  }, []);
+
   // WebSocket — real-time push (only when app is ready)
   useEffect(() => {
     if (phase !== 'app') return;
