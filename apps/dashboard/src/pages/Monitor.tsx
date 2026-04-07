@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { motion } from 'framer-motion';
+import { useEffect, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { formatDistanceToNow } from 'date-fns';
 
 interface Tracker {
@@ -31,6 +32,22 @@ const SEV: Record<string, { bg: string; fg: string; border: string }> = {
 
 export function MonitorPage() {
   const qc = useQueryClient();
+  const [liveFlash, setLiveFlash] = useState(false);
+
+  // Instant re-fetch when ingest broadcasts new errors via WebSocket
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const msg = (e as CustomEvent).detail;
+      if (msg?.type === 'error:new') {
+        qc.invalidateQueries({ queryKey: ['trackers'] });
+        setLiveFlash(true);
+        setTimeout(() => setLiveFlash(false), 1500);
+      }
+    };
+    window.addEventListener('lynx:ws', handler);
+    return () => window.removeEventListener('lynx:ws', handler);
+  }, [qc]);
+
   const { data, isLoading } = useQuery({
     queryKey: ['trackers'],
     queryFn: fetchTrackers,
@@ -61,6 +78,20 @@ export function MonitorPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <AnimatePresence>
+            {liveFlash && (
+              <motion.span
+                key="live"
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0 }}
+                className="badge font-mono"
+                style={{ background: 'var(--red-lo)', color: 'var(--red)', border: '1px solid rgba(224,85,85,0.3)' }}
+              >
+                new error
+              </motion.span>
+            )}
+          </AnimatePresence>
           <span className="badge badge-info">{trackers.length} unresolved</span>
         </div>
       </div>

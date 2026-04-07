@@ -12,7 +12,7 @@
  *  3.8s → Fade to app.
  */
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface BootScreenProps {
@@ -24,13 +24,13 @@ interface BootScreenProps {
 
 const C = {
   bg:          '#07070f',
-  conductor:   [127, 119, 221] as [number, number, number],
-  coder:       [29,  184, 124] as [number, number, number],
-  reasoner:    [212, 160, 23]  as [number, number, number],
-  general:     [152, 150, 200] as [number, number, number],
-  autocomplete:[29,  184, 124] as [number, number, number],
-  scout:       [127, 119, 221] as [number, number, number],
-  line:        [127, 119, 221] as [number, number, number],
+  conductor:   [61,  139, 94]  as [number, number, number],  // olive green
+  coder:       [45,  140, 120] as [number, number, number],  // teal
+  reasoner:    [212, 160, 23]  as [number, number, number],  // amber
+  general:     [113, 113, 122] as [number, number, number],  // zinc grey
+  autocomplete:[45,  140, 120] as [number, number, number],  // teal
+  scout:       [82,  168, 122] as [number, number, number],  // sage green-hi
+  line:        [61,  139, 94]  as [number, number, number],  // olive green
 };
 
 const RADIUS = 148;  // ring radius
@@ -54,7 +54,7 @@ function drawHexGrid(ctx: CanvasRenderingContext2D, w: number, h: number) {
   const size = 36;
   const rows = Math.ceil(h / (size * 1.5)) + 2;
   const cols = Math.ceil(w / (size * Math.sqrt(3))) + 2;
-  ctx.strokeStyle = rgba(C.conductor, 0.04);
+  ctx.strokeStyle = rgba(C.general, 0.06);
   ctx.lineWidth = 0.6;
 
   for (let row = -1; row < rows; row++) {
@@ -353,7 +353,7 @@ function BootLog({ active, isFirstRun }: { active: boolean; isFirstRun?: boolean
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.18 }}
           className="flex items-center justify-between"
-          style={{ color: 'rgba(152,150,200,0.5)', fontSize: 11, lineHeight: '1.9' }}
+          style={{ color: 'rgba(113,113,122,0.5)', fontSize: 11, lineHeight: '1.9' }}
         >
           <span>{line}</span>
           <span style={{ color: 'rgba(29,184,124,0.7)', marginLeft: 24 }}>OK</span>
@@ -434,7 +434,7 @@ export function BootScreen({ onComplete, isFirstRun }: BootScreenProps) {
                   fontSize: 'clamp(56px, 10vw, 88px)',
                   letterSpacing: '0.18em',
                   color: '#f0f0ff',
-                  textShadow: '0 0 60px rgba(127,119,221,0.25)',
+                  textShadow: '0 0 60px rgba(61,139,94,0.25)',
                   minWidth: '4ch',
                 }}
               >
@@ -444,7 +444,7 @@ export function BootScreen({ onComplete, isFirstRun }: BootScreenProps) {
               {/* Divider */}
               <div
                 className="mx-auto mb-3"
-                style={{ width: 200, height: 1, background: 'linear-gradient(90deg, transparent, rgba(127,119,221,0.4), transparent)' }}
+                style={{ width: 200, height: 1, background: 'linear-gradient(90deg, transparent, rgba(61,139,94,0.4), transparent)' }}
               />
 
               {/* Tagline */}
@@ -453,7 +453,7 @@ export function BootScreen({ onComplete, isFirstRun }: BootScreenProps) {
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.4 }}
                 className="font-mono mb-6"
-                style={{ fontSize: 11, letterSpacing: '0.22em', color: 'rgba(152,150,200,0.45)' }}
+                style={{ fontSize: 11, letterSpacing: '0.22em', color: 'rgba(113,113,122,0.45)' }}
               >
                 AI MESH · DEVOPS · OPEN SOURCE
               </motion.div>
@@ -476,7 +476,7 @@ export function BootScreen({ onComplete, isFirstRun }: BootScreenProps) {
       {/* Version — bottom right */}
       <motion.div
         className="absolute bottom-4 right-5 font-mono"
-        style={{ fontSize: 10, color: 'rgba(127,119,221,0.25)', letterSpacing: '0.1em' }}
+        style={{ fontSize: 10, color: 'rgba(61,139,94,0.25)', letterSpacing: '0.1em' }}
         initial={{ opacity: 0 }}
         animate={{ opacity: phase >= 7 ? 1 : 0 }}
         transition={{ delay: 0.8 }}
@@ -494,7 +494,7 @@ export function BootScreen({ onComplete, isFirstRun }: BootScreenProps) {
               left: '50%',
               transform: 'translateX(-50%)',
               fontSize: 9,
-              color: 'rgba(127,119,221,0.55)',
+              color: 'rgba(61,139,94,0.55)',
               letterSpacing: '0.15em',
             }}
             initial={{ opacity: 0 }}

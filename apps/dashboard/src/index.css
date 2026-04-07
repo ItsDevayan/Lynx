@@ -5,20 +5,20 @@
 /* ─── Design tokens ──────────────────────────────────────────────────────── */
 :root {
   /* Background layers */
-  --bg:        #07070f;
-  --surface:   #0d0d18;
-  --surface2:  #111120;
-  --overlay:   #181828;
+  --bg:        #0a0a0a;
+  --surface:   #111111;
+  --surface2:  #161616;
+  --overlay:   #1c1c1c;
 
   /* Borders */
-  --border:       #1a1a2e;
-  --border-dim:   #131325;
-  --border-lit:   #2a2a45;
+  --border:       #1e1e1e;
+  --border-dim:   #141414;
+  --border-lit:   #282828;
 
   /* Text */
-  --text:      #d4d4e8;
-  --text-dim:  #6868a0;
-  --text-mute: #373758;
+  --text:      #e4e4e0;
+  --text-dim:  #888888;
+  --text-mute: #444444;
 
   /* Brand */
   --purple:     #7c6fcd;
@@ -66,10 +66,10 @@ p, h1, h2, h3, h4, label, button, input, textarea {
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border-lit); border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: var(--purple); }
+::-webkit-scrollbar-thumb:hover { background: #666; }
 
 /* ─── Focus ──────────────────────────────────────────────────────────────── */
-:focus-visible { outline: 1px solid var(--purple); outline-offset: 2px; }
+:focus-visible { outline: 1px solid #555; outline-offset: 2px; }
 
 /* ─── Utils ──────────────────────────────────────────────────────────────── */
 .mono { font-family: 'JetBrains Mono', monospace; }
@@ -138,11 +138,11 @@ input[type="text"]::placeholder, textarea::placeholder {
   border: 1px solid transparent;
 }
 .btn-primary {
-  background: linear-gradient(135deg, var(--purple), #5a4fb0);
+  background: linear-gradient(135deg, #3d8b5e, #2d6a4f);
   color: white;
-  border-color: rgba(124,111,205,0.4);
+  border-color: rgba(61,139,94,0.4);
 }
-.btn-primary:hover { filter: brightness(1.15); }
+.btn-primary:hover { filter: brightness(1.12); }
 .btn-ghost {
   background: transparent;
   color: var(--text-dim);

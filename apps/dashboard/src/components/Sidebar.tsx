@@ -1,10 +1,12 @@
 /**
  * Lynx Sidebar — terminal-native nav
- * VS Code-style: icon + label, active indicator, bottom status bar items
+ * VS Code-style: icon + label, active indicator, bottom status
  */
 
+import { useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 const NAV = [
   { to: '/',          icon: '⬡',  label: 'overview',  shortcut: '1' },
@@ -13,23 +15,79 @@ const NAV = [
   { to: '/monitor',   icon: '◎',  label: 'monitor',   shortcut: '4' },
   { to: '/brain',     icon: '◈',  label: 'brain',     shortcut: '5' },
   { to: '/scout',     icon: '◉',  label: 'scout',     shortcut: '6' },
-  { to: '/approvals', icon: '◇',  label: 'approvals', shortcut: '7' },
+  { to: '/approvals',    icon: '◇',  label: 'approvals',    shortcut: '7' },
+  { to: '/integrations', icon: '⬡',  label: 'integrations', shortcut: '8' },
 ];
 
 const BOTTOM_NAV = [
   { to: '/settings', icon: '⚙', label: 'settings' },
 ];
 
+const PROVIDER_LABEL: Record<string, string> = {
+  groq:        'groq',
+  'claude-api': 'claude api',
+  'claude-cli': 'claude cli',
+  openai:      'openai',
+  gemini:      'gemini',
+  aider:       'aider',
+  codex:       'codex',
+  'gemini-cli': 'gemini cli',
+  none:        'no ai',
+  skip:        'no ai',
+  ollama:      'ollama',
+};
+
 interface SidebarProps {
   projectPath?: string;
   llmMode?: string;
 }
 
+interface MeshStatus {
+  active: boolean;
+  bundleName: string;
+  ram: number;
+  parallel: boolean;
+}
+
 export function Sidebar({ projectPath, llmMode }: SidebarProps) {
   const location = useLocation();
+  const qc = useQueryClient();
   const projectName = projectPath
     ? projectPath.split('/').filter(Boolean).pop() ?? projectPath
     : null;
+
+  // Poll mesh status every 30s
+  const mesh = useQuery<MeshStatus>({
+    queryKey: ['mesh-status-sidebar'],
+    queryFn: () => fetch('/api/mesh/status').then(r => r.json()),
+    refetchInterval: 30_000,
+    retry: false,
+  });
+
+  // Pending approvals count — live via WS
+  const hitl = useQuery<{ count: number }>({
+    queryKey: ['hitl-count'],
+    queryFn: () => fetch('/api/hitl').then(r => r.json()).then(d => ({ count: d.count ?? 0 })),
+    refetchInterval: 30_000,
+    retry: false,
+  });
+
+  // Re-fetch approvals count when HITL events arrive over WS
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const msg = (e as CustomEvent).detail;
+      if (msg?.type === 'hitl:created' || msg?.type === 'hitl:applied') {
+        qc.invalidateQueries({ queryKey: ['hitl-count'] });
+      }
+    };
+    window.addEventListener('lynx:ws', handler);
+    return () => window.removeEventListener('lynx:ws', handler);
+  }, [qc]);
+
+  const orchestratorLabel = llmMode ? (PROVIDER_LABEL[llmMode] ?? llmMode) : 'no ai';
+  const aiActive = !!llmMode && llmMode !== 'skip' && llmMode !== 'none';
+  const meshActive = mesh.data?.active ?? false;
+  const pendingApprovals = (hitl.data as any)?.count ?? 0;
 
   return (
     <aside
@@ -42,10 +100,7 @@ export function Sidebar({ projectPath, llmMode }: SidebarProps) {
       }}
     >
       {/* Logo / project */}
-      <div
-        className="px-4 py-3 border-b"
-        style={{ borderColor: 'var(--border)' }}
-      >
+      <div className="px-4 py-3 border-b" style={{ borderColor: 'var(--border)' }}>
         <div className="flex items-center gap-2 mb-1">
           <div
             className="w-6 h-6 rounded flex items-center justify-center flex-shrink-0"
@@ -82,9 +137,7 @@ export function Sidebar({ projectPath, llmMode }: SidebarProps) {
             className="flex items-center gap-1.5 mt-1 hover:opacity-80 transition-opacity"
           >
             <span style={{ color: 'var(--text-mute)', fontSize: 10 }}>○</span>
-            <span className="text-xs font-mono" style={{ color: 'var(--text-mute)' }}>
-              no project
-            </span>
+            <span className="text-xs font-mono" style={{ color: 'var(--text-mute)' }}>no project</span>
           </NavLink>
         )}
       </div>
@@ -97,12 +150,7 @@ export function Sidebar({ projectPath, llmMode }: SidebarProps) {
             : location.pathname.startsWith(to);
 
           return (
-            <NavLink
-              key={to}
-              to={to}
-              end={to === '/'}
-              className="block relative"
-            >
+            <NavLink key={to} to={to} end={to === '/'} className="block relative">
               <div
                 className="flex items-center gap-2.5 px-4 py-2 transition-all duration-100"
                 style={{
@@ -124,6 +172,24 @@ export function Sidebar({ projectPath, llmMode }: SidebarProps) {
                   {icon}
                 </span>
                 <span className="text-xs flex-1">{label}</span>
+                {/* brain badge: show "mesh" when active */}
+                {to === '/brain' && meshActive && (
+                  <span
+                    className="font-mono text-xs px-1 rounded"
+                    style={{ background: 'var(--teal-lo)', color: 'var(--teal)', fontSize: 9 }}
+                  >
+                    mesh
+                  </span>
+                )}
+                {/* approvals badge: pending count */}
+                {to === '/approvals' && pendingApprovals > 0 && (
+                  <span
+                    className="font-mono text-xs px-1.5 rounded-full"
+                    style={{ background: 'var(--amber-lo)', color: 'var(--amber)', fontSize: 9, border: '1px solid rgba(212,160,23,0.4)', minWidth: 16, textAlign: 'center' }}
+                  >
+                    {pendingApprovals}
+                  </span>
+                )}
                 <span
                   className="font-mono opacity-0 group-hover:opacity-100 transition-opacity"
                   style={{ fontSize: 10, color: 'var(--text-mute)' }}
@@ -152,18 +218,51 @@ export function Sidebar({ projectPath, llmMode }: SidebarProps) {
           </NavLink>
         ))}
 
-        {/* LLM indicator */}
+        {/* Two-tier AI indicator */}
         <div
-          className="px-4 py-2 flex items-center gap-2"
+          className="px-3 py-2.5 space-y-1.5"
           style={{ borderTop: '1px solid var(--border-dim)' }}
         >
-          <span
-            className="pulse-dot"
-            style={{ background: llmMode && llmMode !== 'skip' ? 'var(--teal)' : 'var(--text-mute)' }}
-          />
-          <span className="text-xs font-mono" style={{ color: 'var(--text-mute)' }}>
-            {llmMode === 'groq' ? 'groq / llama3' : llmMode === 'ollama' ? 'ollama' : llmMode === 'claude-cli' ? 'claude cli' : 'no ai'}
-          </span>
+          {/* Orchestrator row */}
+          <div className="flex items-center gap-2">
+            <span
+              className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+              style={{ background: aiActive ? 'var(--purple-hi)' : 'var(--text-mute)' }}
+            />
+            <span className="text-xs font-mono truncate" style={{ color: aiActive ? 'var(--purple-hi)' : 'var(--text-mute)', fontSize: 10 }}>
+              {orchestratorLabel}
+            </span>
+            <span className="ml-auto text-xs font-mono" style={{ color: 'var(--text-mute)', fontSize: 9 }}>orch</span>
+          </div>
+
+          {/* Executor / mesh row */}
+          <div className="flex items-center gap-2">
+            <span
+              className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${meshActive ? 'pulse-dot' : ''}`}
+              style={{ background: meshActive ? 'var(--teal)' : 'var(--text-mute)', width: 6, height: 6 }}
+            />
+            <span className="text-xs font-mono truncate" style={{ color: meshActive ? 'var(--teal)' : 'var(--text-mute)', fontSize: 10 }}>
+              {mesh.data ? mesh.data.bundleName.toLowerCase() : 'ollama'}
+            </span>
+            <span className="ml-auto text-xs font-mono" style={{ color: 'var(--text-mute)', fontSize: 9 }}>exec</span>
+          </div>
+
+          {/* RAM + parallel badge */}
+          {mesh.data && (
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="font-mono" style={{ color: 'var(--text-mute)', fontSize: 9 }}>
+                {mesh.data.ram}GB
+              </span>
+              {mesh.data.parallel && (
+                <span
+                  className="font-mono px-1 rounded"
+                  style={{ background: 'var(--teal-lo)', color: 'var(--teal)', fontSize: 9 }}
+                >
+                  ∥ parallel
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </aside>

@@ -10,9 +10,38 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
+// ─── Lynx Icon ────────────────────────────────────────────────────────────────
+
+function LynxIcon({ size = 24 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <polygon points="8,20 14,4 20,18" fill="url(#ob-lg)" opacity="0.9" />
+      <polygon points="40,20 34,4 28,18" fill="url(#ob-lg)" opacity="0.9" />
+      <polygon points="10,18 14,7 18,17" fill="#07070f" opacity="0.6" />
+      <polygon points="38,18 34,7 30,17" fill="#07070f" opacity="0.6" />
+      <path d="M8 20 Q6 36 24 44 Q42 36 40 20 Q34 14 24 14 Q14 14 8 20Z" fill="url(#ob-lg)" />
+      <ellipse cx="17" cy="26" rx="3.5" ry="2.5" fill="#07070f" />
+      <ellipse cx="31" cy="26" rx="3.5" ry="2.5" fill="#07070f" />
+      <ellipse cx="17" cy="26" rx="1.5" ry="2" fill="url(#ob-eye)" />
+      <ellipse cx="31" cy="26" rx="1.5" ry="2" fill="url(#ob-eye)" />
+      <path d="M22 33 L24 31 L26 33 L24 35Z" fill="#07070f" opacity="0.7" />
+      <defs>
+        <linearGradient id="ob-lg" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#52a87a" />
+          <stop offset="100%" stopColor="#3d8b5e" />
+        </linearGradient>
+        <linearGradient id="ob-eye" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#52a87a" />
+          <stop offset="100%" stopColor="#3d8b5e" />
+        </linearGradient>
+      </defs>
+    </svg>
+  );
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type OrchestratorProvider = 'groq' | 'claude-api' | 'claude-cli' | 'openai' | 'none';
+type OrchestratorProvider = 'groq' | 'claude-api' | 'claude-cli' | 'openai' | 'gemini' | 'codex' | 'gemini-cli' | 'aider' | 'none';
 type ExecutorProvider     = 'ollama' | 'orchestrator';
 type UseCaseProfile = 'coding-heavy' | 'general-use' | 'balanced' | 'research' | 'creative' | 'minimal';
 
@@ -58,32 +87,66 @@ interface OnboardingProps {
 
 const STEP_LABELS = ['Profile', 'Project', 'AI Setup', 'Alerts'];
 
-function Steps({ current }: { current: number }) {
+function Steps({ current, onGoTo }: { current: number; onGoTo?: (step: number) => void }) {
   return (
-    <div className="flex items-center gap-0 mb-8">
-      {STEP_LABELS.map((label, i) => (
-        <div key={i} className="flex items-center">
-          <div className="flex items-center gap-2">
-            <div
-              className="w-5 h-5 rounded-full flex items-center justify-center transition-all duration-300"
+    <div className="mb-6">
+      {/* Step label */}
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-mono" style={{ color: 'var(--text-dim)' }}>
+          Step {current + 1} of {STEP_LABELS.length}: <span style={{ color: 'var(--text)' }}>{STEP_LABELS[current]}</span>
+        </span>
+        <span className="text-xs font-mono" style={{ color: 'var(--text-mute)' }}>
+          {Math.round(((current) / STEP_LABELS.length) * 100)}%
+        </span>
+      </div>
+      {/* Progress track */}
+      <div className="relative h-1 rounded-full overflow-hidden" style={{ background: 'var(--border-lit)' }}>
+        <div
+          className="absolute left-0 top-0 h-full rounded-full transition-all duration-500"
+          style={{
+            width: `${((current) / STEP_LABELS.length) * 100}%`,
+            background: 'linear-gradient(90deg, #3d8b5e, #52a87a)',
+          }}
+        />
+      </div>
+      {/* Step dots — completed steps are clickable to go back */}
+      <div className="flex items-center justify-between mt-2">
+        {STEP_LABELS.map((label, i) => {
+          const isCompleted = i < current;
+          const isCurrent   = i === current;
+          return (
+            <button
+              key={i}
+              onClick={() => isCompleted && onGoTo?.(i)}
+              disabled={!isCompleted}
+              className="flex items-center gap-1 transition-opacity"
               style={{
-                background:  i < current  ? 'var(--teal)'    : i === current ? 'var(--purple)' : 'var(--surface2)',
-                color:       i <= current ? 'white'          : 'var(--text-mute)',
-                border:      `1px solid ${i === current ? 'var(--purple-hi)' : i < current ? 'var(--teal)' : 'var(--border-lit)'}`,
-                fontSize:    10,
+                background: 'none', border: 'none', padding: 0,
+                cursor: isCompleted ? 'pointer' : 'default',
+                opacity: isCompleted ? 1 : isCurrent ? 1 : 0.5,
               }}
+              title={isCompleted ? `Back to ${label}` : undefined}
             >
-              {i < current ? '✓' : i + 1}
-            </div>
-            <span className="text-xs" style={{ color: i === current ? 'var(--text)' : i < current ? 'var(--teal)' : 'var(--text-mute)' }}>
-              {label}
-            </span>
-          </div>
-          {i < STEP_LABELS.length - 1 && (
-            <div className="w-8 h-px mx-2" style={{ background: i < current ? 'var(--teal)' : 'var(--border)' }} />
-          )}
-        </div>
-      ))}
+              <div
+                className="rounded-full transition-all duration-300"
+                style={{
+                  width: isCompleted ? 8 : 6,
+                  height: isCompleted ? 8 : 6,
+                  background: isCompleted ? '#3d8b5e' : isCurrent ? '#52a87a' : 'var(--border-lit)',
+                  boxShadow: isCompleted ? '0 0 0 2px rgba(61,139,94,0.2)' : 'none',
+                }}
+              />
+              <span className="text-[10px] font-mono hidden sm:block" style={{
+                color: isCompleted ? '#52a87a' : isCurrent ? 'var(--text-dim)' : 'var(--text-mute)',
+                textDecoration: isCompleted ? 'underline' : 'none',
+                textUnderlineOffset: 2,
+              }}>
+                {label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -162,58 +225,67 @@ function StepUseCase({ onNext }: { onNext: (profile: UseCaseProfile) => void }) 
 
   return (
     <div>
-      <p className="section-title mb-1">step 1 / 4</p>
-      <h2 className="text-lg font-semibold mb-1">What will you use Lynx for?</h2>
-      <p className="text-xs mb-6" style={{ color: 'var(--text-dim)' }}>
+      <h2 className="text-base font-semibold mb-1">What will you use Lynx for?</h2>
+      <p className="text-xs mb-5" style={{ color: 'var(--text-dim)' }}>
         This determines which local models are recommended. You can change it later.
       </p>
 
-      <div className="space-y-1.5 mb-6">
-        {USE_CASES.map((uc) => (
-          <button
-            key={uc.id}
-            onClick={() => setSelected(uc.id)}
-            className="w-full text-left rounded p-3 transition-all"
-            style={{
-              background: selected === uc.id ? 'var(--surface2)' : 'var(--bg)',
-              border: `1px solid ${selected === uc.id ? 'var(--purple)' : 'var(--border)'}`,
-            }}
-          >
-            <div className="flex items-start gap-3">
-              <span className="font-mono mt-0.5" style={{ color: selected === uc.id ? 'var(--purple-hi)' : 'var(--text-mute)' }}>
+      {/* Card grid — matches screenshot style */}
+      <div className="grid grid-cols-2 gap-2 mb-5">
+        {USE_CASES.map((uc) => {
+          const active = selected === uc.id;
+          return (
+            <button
+              key={uc.id}
+              onClick={() => setSelected(uc.id)}
+              className="text-left rounded-lg p-3 transition-all relative"
+              style={{
+                background: active ? 'var(--surface2)' : 'var(--bg)',
+                border: `1px solid ${active ? '#3d8b5e' : 'var(--border)'}`,
+                outline: 'none',
+              }}
+            >
+              {active && (
+                <span
+                  className="absolute top-2 right-2 text-[10px] w-4 h-4 rounded-full flex items-center justify-center"
+                  style={{ background: '#3d8b5e', color: '#fff', fontSize: 9 }}
+                >
+                  ✓
+                </span>
+              )}
+              <span
+                className="text-base mb-1.5 block"
+                style={{ color: active ? '#52a87a' : 'var(--text-mute)' }}
+              >
                 {uc.icon}
               </span>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-medium" style={{ color: selected === uc.id ? 'var(--text)' : 'var(--text-dim)' }}>
-                    {uc.label}
-                  </span>
-                  <span className="text-xs" style={{ color: 'var(--text-mute)' }}>{uc.desc}</span>
-                </div>
-                <AnimatePresence>
-                  {selected === uc.id && (
-                    <motion.p
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      className="text-xs mt-1 font-mono"
-                      style={{ color: 'var(--text-mute)' }}
-                    >
-                      {uc.details}
-                    </motion.p>
-                  )}
-                </AnimatePresence>
-              </div>
-              {selected === uc.id && (
-                <span style={{ color: 'var(--teal)', fontSize: 12 }}>✓</span>
-              )}
-            </div>
-          </button>
-        ))}
+              <p className="text-xs font-medium leading-tight" style={{ color: active ? 'var(--text)' : 'var(--text-dim)' }}>
+                {uc.label}
+              </p>
+              <p className="text-[10px] mt-0.5 leading-tight" style={{ color: 'var(--text-mute)' }}>
+                {uc.desc}
+              </p>
+              <AnimatePresence>
+                {active && (
+                  <motion.p
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="text-[10px] mt-1.5 font-mono leading-relaxed"
+                    style={{ color: 'var(--text-mute)', overflow: 'hidden' }}
+                  >
+                    {uc.details}
+                  </motion.p>
+                )}
+              </AnimatePresence>
+            </button>
+          );
+        })}
       </div>
 
       <button
         className="btn btn-primary"
+        style={selected ? { background: 'linear-gradient(135deg, #3d8b5e, #2d6a4f)', borderColor: 'rgba(34,197,94,0.4)' } : {}}
         disabled={!selected}
         onClick={() => selected && onNext(selected)}
       >
@@ -380,47 +452,89 @@ const ORCHESTRATORS: Array<{
   tagStyle: React.CSSProperties;
   desc: string;
   needsKey: boolean;
+  isCli?: boolean;
   keyLabel?: string;
   keyPlaceholder?: string;
+  keyHint?: string;
 }> = [
   {
     id: 'groq',
     label: 'Groq API',
     tag: 'FREE',
     tagStyle: { background: 'var(--teal-lo)', color: 'var(--teal)', border: '1px solid rgba(29,184,124,0.3)' },
-    desc: 'Llama 3.3 70B · free · fastest option',
+    desc: 'Llama 3.3 70B · free · fastest cloud option',
     needsKey: true, keyLabel: 'GROQ API KEY', keyPlaceholder: 'gsk_••••••••••••••••',
+    keyHint: 'Free at console.groq.com → API Keys',
   },
   {
     id: 'claude-api',
     label: 'Claude API',
     tag: 'BEST',
     tagStyle: { background: 'rgba(212,160,23,0.15)', color: 'var(--amber)', border: '1px solid rgba(212,160,23,0.3)' },
-    desc: 'Claude Opus · best reasoning · extended thinking',
+    desc: 'claude-3-5-sonnet · best reasoning · extended thinking',
     needsKey: true, keyLabel: 'ANTHROPIC API KEY', keyPlaceholder: 'sk-ant-••••••••••••••••',
-  },
-  {
-    id: 'claude-cli',
-    label: 'Claude CLI',
-    tag: 'PRO',
-    tagStyle: { background: 'rgba(212,160,23,0.1)', color: 'var(--amber)', border: '1px solid rgba(212,160,23,0.2)' },
-    desc: 'Uses your existing Claude Pro/Team subscription',
-    needsKey: false,
+    keyHint: 'console.anthropic.com → API Keys',
   },
   {
     id: 'openai',
     label: 'OpenAI',
     tag: 'GPT-4o',
     tagStyle: { background: 'var(--purple-lo)', color: 'var(--purple-hi)', border: '1px solid rgba(124,111,205,0.3)' },
-    desc: 'GPT-4o · reliable · widely tested',
+    desc: 'gpt-4o · reliable · widely tested',
     needsKey: true, keyLabel: 'OPENAI API KEY', keyPlaceholder: 'sk-••••••••••••••••',
+    keyHint: 'platform.openai.com → API Keys',
+  },
+  {
+    id: 'gemini',
+    label: 'Google Gemini',
+    tag: 'API',
+    tagStyle: { background: 'rgba(29,184,124,0.08)', color: 'var(--teal)', border: '1px solid rgba(29,184,124,0.2)' },
+    desc: 'gemini-2.0-flash · large context · multimodal',
+    needsKey: true, keyLabel: 'GEMINI API KEY', keyPlaceholder: 'AIza••••••••••••••••',
+    keyHint: 'aistudio.google.com → Get API Key',
+  },
+  {
+    id: 'claude-cli',
+    label: 'Claude CLI',
+    tag: 'CLI',
+    tagStyle: { background: 'rgba(212,160,23,0.1)', color: 'var(--amber)', border: '1px solid rgba(212,160,23,0.2)' },
+    desc: 'Uses your Claude Pro/Max subscription · runs locally via terminal',
+    needsKey: false, isCli: true,
+    keyHint: 'Install: npm i -g @anthropic-ai/claude-code  then run: claude login',
+  },
+  {
+    id: 'codex',
+    label: 'OpenAI Codex CLI',
+    tag: 'CLI',
+    tagStyle: { background: 'var(--purple-lo)', color: 'var(--purple-hi)', border: '1px solid rgba(124,111,205,0.2)' },
+    desc: 'OpenAI Codex CLI · agent mode · your existing OpenAI subscription',
+    needsKey: false, isCli: true,
+    keyHint: 'Install: npm i -g @openai/codex  then run: codex login',
+  },
+  {
+    id: 'gemini-cli',
+    label: 'Gemini CLI',
+    tag: 'CLI',
+    tagStyle: { background: 'rgba(29,184,124,0.08)', color: 'var(--teal)', border: '1px solid rgba(29,184,124,0.2)' },
+    desc: 'Google Gemini CLI · 1M token context · your Google account',
+    needsKey: false, isCli: true,
+    keyHint: 'Install: npm i -g @google/gemini-cli  then run: gemini auth',
+  },
+  {
+    id: 'aider',
+    label: 'Aider',
+    tag: 'CLI',
+    tagStyle: { background: 'var(--surface2)', color: 'var(--text-dim)', border: '1px solid var(--border-lit)' },
+    desc: 'Aider AI pair programmer · works with any model',
+    needsKey: false, isCli: true,
+    keyHint: 'Install: pip install aider-chat  then run: aider --model sonnet',
   },
   {
     id: 'none',
     label: 'Skip for now',
     tag: '',
     tagStyle: {},
-    desc: 'Local executor only. Brain features limited.',
+    desc: 'Local executor only. AI planning features limited.',
     needsKey: false,
   },
 ];
@@ -698,6 +812,8 @@ function BundleCard({ bundle, selected, ramGb, vramGb = 0, onSelect, expanded = 
   );
 }
 
+type VerifyState = 'idle' | 'loading' | 'ok' | 'error';
+
 function StepLLM({ useCase, onNext, onBack }: {
   useCase: UseCaseProfile;
   onNext: (cfg: LynxConfig['orchestrator'] & { executor: LynxConfig['executor'] }) => void;
@@ -709,18 +825,27 @@ function StepLLM({ useCase, onNext, onBack }: {
   const [executorProvider, setExecutorProvider] = useState<ExecutorProvider>('ollama');
   const [bundleId, setBundleId] = useState<string>('');
   const [tab, setTab] = useState<'orchestrator' | 'bundle'>('orchestrator');
+  const [verifyState, setVerifyState] = useState<VerifyState>('idle');
+  const [verifyDetail, setVerifyDetail] = useState('');
+  const [verifyError, setVerifyError] = useState('');
+
+  // Reset verify state when provider or key changes
+  useEffect(() => {
+    setVerifyState('idle');
+    setVerifyDetail('');
+    setVerifyError('');
+  }, [orchestratorId, apiKey]);
 
   useEffect(() => {
     fetch('/api/setup/system-info')
       .then(r => r.json())
       .then((d: SystemInfo) => {
         setSysInfo(d);
-        // Auto-select best bundle for RAM + use-case
         const viable = BUNDLES
           .filter(b => d.ram >= b.minRamGb && b.suitableFor.includes(useCase))
           .sort((a, x) => x.minRamGb - a.minRamGb);
         if (viable[0]) setBundleId(viable[0].id);
-        else setBundleId(BUNDLES[0].id); // fallback: minimal
+        else setBundleId(BUNDLES[0].id);
       })
       .catch(() => {
         setSysInfo({ ram: 8, cpus: 4, recommendations: [] });
@@ -732,7 +857,35 @@ function StepLLM({ useCase, onNext, onBack }: {
   const selectedBundle = BUNDLES.find(b => b.id === bundleId);
   const ram = sysInfo?.ram ?? 8;
 
+  // Connection must be verified before proceeding (unless skipping)
+  const canProceed = orchestratorId === 'none' || verifyState === 'ok';
+
+  const verify = async () => {
+    setVerifyState('loading');
+    setVerifyDetail('');
+    setVerifyError('');
+    try {
+      const resp = await fetch('/api/setup/test-orchestrator', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ provider: orchestratorId, apiKey: apiKey || undefined }),
+      });
+      const data = await resp.json() as { ok: boolean; detail?: string; error?: string };
+      if (data.ok) {
+        setVerifyState('ok');
+        setVerifyDetail(data.detail ?? 'Connected');
+      } else {
+        setVerifyState('error');
+        setVerifyError(data.error ?? 'Connection failed');
+      }
+    } catch {
+      setVerifyState('error');
+      setVerifyError('Could not reach Lynx API. Is the backend running?');
+    }
+  };
+
   const submit = () => {
+    if (!canProceed) return;
     const primaryModel = selectedBundle
       ? (selectedBundle.models['coder'] ?? selectedBundle.models['general'])?.tag
       : undefined;
@@ -828,6 +981,7 @@ function StepLLM({ useCase, onNext, onBack }: {
               ))}
             </div>
 
+            {/* API key input for cloud providers */}
             <AnimatePresence>
               {orch.needsKey && (
                 <motion.div
@@ -845,26 +999,56 @@ function StepLLM({ useCase, onNext, onBack }: {
                     placeholder={orch.keyPlaceholder}
                     value={apiKey}
                     onChange={(e) => setApiKey(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && apiKey.trim()) verify(); }}
                   />
-                  {orchestratorId === 'groq' && (
-                    <p className="text-xs mt-1 font-mono" style={{ color: 'var(--text-mute)' }}>
-                      free at console.groq.com → API Keys
-                    </p>
+                  {orch.keyHint && (
+                    <p className="text-xs mt-1 font-mono" style={{ color: 'var(--text-mute)' }}>{orch.keyHint}</p>
                   )}
                 </motion.div>
               )}
             </AnimatePresence>
 
-            {orchestratorId === 'groq' && (
-              <div
-                className="rounded p-2.5 text-xs"
-                style={{ background: 'rgba(29,184,124,0.06)', border: '1px solid rgba(29,184,124,0.2)' }}
-              >
-                <span style={{ color: 'var(--teal)' }}>✓ recommended</span>
-                <span className="ml-2" style={{ color: 'var(--text-dim)' }}>
-                  Groq is free and runs Llama 3.3 70B — the same reasoning quality as GPT-4.
-                  Your code stays local; only the task description leaves your machine.
-                </span>
+            {/* CLI hint for terminal-based providers */}
+            <AnimatePresence>
+              {orch.isCli && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="mb-4 rounded p-3 text-xs"
+                  style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}
+                >
+                  <p className="font-mono mb-1" style={{ color: 'var(--text-dim)' }}>setup instructions</p>
+                  <p style={{ color: 'var(--text-mute)', lineHeight: 1.6 }}>{orch.keyHint}</p>
+                  <p className="mt-2" style={{ color: 'var(--text-mute)' }}>
+                    Click <span style={{ color: 'var(--purple-hi)' }}>Test connection</span> below — Lynx will verify the CLI is installed and authenticated.
+                  </p>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Verify connection button + status */}
+            {orchestratorId !== 'none' && (
+              <div className="mb-4">
+                <div className="flex items-center gap-2">
+                  <button
+                    className="btn btn-ghost text-xs"
+                    onClick={verify}
+                    disabled={verifyState === 'loading' || (orch.needsKey && !apiKey.trim())}
+                    style={{ fontSize: 11 }}
+                  >
+                    {verifyState === 'loading' ? '⟳ Testing…' : '⚡ Test connection'}
+                  </button>
+                  {verifyState === 'ok' && (
+                    <span className="text-xs font-mono" style={{ color: 'var(--teal)' }}>✓ {verifyDetail}</span>
+                  )}
+                  {verifyState === 'error' && (
+                    <span className="text-xs font-mono" style={{ color: 'var(--red)' }}>✗ {verifyError}</span>
+                  )}
+                </div>
+                {orch.needsKey && !apiKey.trim() && (
+                  <p className="text-xs mt-1 font-mono" style={{ color: 'var(--text-mute)' }}>Enter your API key above to test</p>
+                )}
               </div>
             )}
           </motion.div>
@@ -978,10 +1162,20 @@ function StepLLM({ useCase, onNext, onBack }: {
         )}
       </AnimatePresence>
 
-      <div className="mt-5">
-        <button className="btn btn-primary" onClick={submit}>
+      <div className="mt-5 flex items-center gap-3">
+        <button
+          className="btn btn-primary"
+          onClick={submit}
+          disabled={!canProceed}
+          title={!canProceed ? 'Test your orchestrator connection first' : undefined}
+        >
           Continue →
         </button>
+        {!canProceed && orchestratorId !== 'none' && (
+          <span className="text-xs font-mono" style={{ color: 'var(--text-mute)' }}>
+            ← verify connection first
+          </span>
+        )}
       </div>
     </div>
   );
@@ -1134,20 +1328,33 @@ export function Onboarding({ onComplete }: OnboardingProps) {
       >
         <div className="rounded-lg p-7" style={{ background: 'var(--surface)', border: '1px solid var(--border-lit)' }}>
           {/* Header */}
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-2.5">
-              <div
-                className="w-7 h-7 rounded-lg flex items-center justify-center"
-                style={{ background: 'linear-gradient(135deg, var(--purple), var(--teal))', boxShadow: '0 0 16px rgba(124,111,205,0.4)' }}
-              >
-                <span className="text-white font-bold text-xs font-mono">L</span>
-              </div>
+          <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center gap-2">
+              <LynxIcon size={26} />
               <span className="text-sm font-semibold">Lynx</span>
             </div>
-            <span className="text-xs font-mono" style={{ color: 'var(--text-mute)' }}>setup wizard</span>
+            <span
+              className="text-[10px] font-mono px-2 py-0.5 rounded"
+              style={{ background: 'rgba(34,197,94,0.08)', color: '#52a87a', border: '1px solid rgba(34,197,94,0.2)' }}
+            >
+              setup wizard
+            </span>
           </div>
 
-          <Steps current={step} />
+          {/* Intro message (step 0 only) */}
+          {step === 0 && (
+            <div
+              className="flex items-start gap-2.5 mb-5 p-3 rounded-lg"
+              style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}
+            >
+              <LynxIcon size={18} />
+              <p className="text-xs leading-relaxed" style={{ color: 'var(--text-dim)' }}>
+                Hey! Let's get you set up in 2 minutes. A few quick questions to pick the right AI models for your machine.
+              </p>
+            </div>
+          )}
+
+          <Steps current={step} onGoTo={(n) => go(n)} />
 
           <AnimatePresence mode="wait">
             <motion.div

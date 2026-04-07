@@ -1,10 +1,26 @@
-import { useQuery } from '@tanstack/react-query';
-import { motion } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useNavigate, Navigate } from 'react-router-dom';
+import { formatDistanceToNow } from 'date-fns';
 
 interface LynxConfig {
   projectPath?: string;
   llm?: { mode: string };
+  orchestrator?: { provider: string; model?: string };
+  executor?: { provider: string; bundleId?: string };
+  projectAnswers?: Record<string, string>;
+}
+
+interface MeshStatus {
+  active: boolean;
+  bundleId: string;
+  bundleName: string;
+  useCase: string;
+  ram: number;
+  parallel: boolean;
+  ollamaUrl: string;
+  models: Record<string, { name?: string; tag?: string; ram?: number } | null>;
 }
 
 function getConfig(): LynxConfig | null {
@@ -80,6 +96,22 @@ interface HealthData {
 
 interface Counts { DEBUG?: number; INFO?: number; WARN?: number; ERROR?: number; FATAL?: number; }
 
+interface Tracker {
+  fingerprint: string;
+  errorName: string;
+  severity: string;
+  sampleMessage: string;
+  occurrences: number;
+  lastOccurrence: string;
+  layer: string;
+}
+
+interface GitStatus {
+  branch: string;
+  clean: boolean;
+  summary: { staged: number; unstaged: number; untracked: number };
+}
+
 const SEV_COLOR: Record<string, string> = {
   DEBUG: 'var(--text-mute)',
   INFO:  'var(--purple)',
@@ -89,15 +121,59 @@ const SEV_COLOR: Record<string, string> = {
 };
 
 function ConnectedDashboard({ config }: { config: LynxConfig }) {
+  const navigate = useNavigate();
+  const qc = useQueryClient();
   const projectName = config.projectPath?.split('/').filter(Boolean).pop() ?? 'project';
+  const [scanning, setScanning] = useState(false);
 
-  const health  = useQuery<HealthData>({ queryKey: ['health'],  queryFn: () => fetch('/api/health').then(r => r.json()),        refetchInterval: 30_000 });
-  const counts  = useQuery<Counts>     ({ queryKey: ['counts'],  queryFn: () => fetch('/api/monitor/counts').then(r => r.json()), refetchInterval: 15_000 });
+  const health    = useQuery<HealthData>({ queryKey: ['health'],   queryFn: () => fetch('/api/health').then(r => r.json()),              refetchInterval: 30_000 });
+  const counts    = useQuery<Counts>    ({ queryKey: ['counts'],   queryFn: () => fetch('/api/monitor/counts').then(r => r.json()),      refetchInterval: 15_000 });
+  const trackers  = useQuery<{ trackers: Tracker[] }>({ queryKey: ['trackers-overview'], queryFn: () => fetch('/api/monitor/trackers?resolved=false&limit=4').then(r => r.json()), refetchInterval: 20_000 });
+  const hitl      = useQuery<{ count: number }>({ queryKey: ['hitl-count'], queryFn: () => fetch('/api/hitl').then(r => r.json()).then(d => ({ count: d.count ?? 0 })), refetchInterval: 30_000 });
+  const gitStatus = useQuery<GitStatus>({ queryKey: ['git-status'], queryFn: () => fetch(`/api/git/status?projectPath=${encodeURIComponent(config.projectPath ?? '')}`).then(r => r.ok ? r.json() : null), refetchInterval: 30_000, retry: false });
+
+  // Instant re-fetch when error:new arrives over WS
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const msg = (e as CustomEvent).detail;
+      if (msg?.type === 'error:new') {
+        qc.invalidateQueries({ queryKey: ['counts'] });
+        qc.invalidateQueries({ queryKey: ['trackers-overview'] });
+      }
+      if (msg?.type === 'hitl:created') {
+        qc.invalidateQueries({ queryKey: ['hitl-count'] });
+      }
+    };
+    window.addEventListener('lynx:ws', handler);
+    return () => window.removeEventListener('lynx:ws', handler);
+  }, [qc]);
+
+  const handleScanNow = async () => {
+    if (!config.projectPath) return;
+    setScanning(true);
+    try {
+      await fetch('/api/security/scan', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ projectPath: config.projectPath, sast: false }),
+      });
+      navigate('/security');
+    } catch { /* ignore */ }
+    setScanning(false);
+  };
 
   const c = counts.data ?? {};
   const errors = (c.ERROR ?? 0) + (c.FATAL ?? 0);
   const warns  = c.WARN ?? 0;
   const isOk   = health.data?.status === 'ok';
+  const pendingApprovals = (hitl.data as any)?.count ?? 0;
+  const recentTrackers = trackers.data?.trackers ?? [];
+  const git = gitStatus.data;
+
+  const SEV_DOT: Record<string, string> = {
+    DEBUG: 'var(--text-mute)', INFO: 'var(--purple-hi)',
+    WARN: 'var(--amber)', ERROR: 'var(--red)', FATAL: '#ff3333',
+  };
 
   return (
     <div className="p-6 max-w-4xl">
@@ -120,7 +196,28 @@ function ConnectedDashboard({ config }: { config: LynxConfig }) {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          <button className="btn btn-ghost text-xs">⟳ Scan now</button>
+          {/* Git branch indicator */}
+          {git && (
+            <span
+              className="font-mono text-xs px-2 py-0.5 rounded flex items-center gap-1.5"
+              style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-dim)' }}
+            >
+              <span style={{ color: 'var(--purple-hi)' }}>⎇</span>
+              {git.branch}
+              {!git.clean && (
+                <span style={{ color: 'var(--amber)' }}>
+                  {git.summary.staged > 0 ? `+${git.summary.staged}` : ''}{git.summary.unstaged > 0 ? ` ~${git.summary.unstaged}` : ''}
+                </span>
+              )}
+            </span>
+          )}
+          <button
+            className="btn btn-ghost text-xs"
+            onClick={handleScanNow}
+            disabled={scanning}
+          >
+            {scanning ? '…' : '⟳ Scan now'}
+          </button>
         </div>
       </div>
 
@@ -171,49 +268,224 @@ function ConnectedDashboard({ config }: { config: LynxConfig }) {
         </div>
       </motion.div>
 
-      {/* LLM status */}
-      <motion.div
-        className="rounded p-4"
-        style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.4 }}
-      >
-        <p className="section-title mb-3">ai configuration</p>
-        <div className="flex items-center gap-3 text-xs">
-          <span
-            className="badge"
-            style={{
-              background: config.llm?.mode !== 'skip' ? 'var(--teal-lo)' : 'var(--surface2)',
-              color: config.llm?.mode !== 'skip' ? 'var(--teal)' : 'var(--text-dim)',
-              border: `1px solid ${config.llm?.mode !== 'skip' ? 'rgba(29,184,124,0.3)' : 'var(--border)'}`,
-            }}
-          >
-            {config.llm?.mode ?? 'not configured'}
-          </span>
-          {config.llm?.mode === 'skip' && (
-            <span style={{ color: 'var(--text-mute)' }}>
-              Brain features disabled. Configure in settings →
-            </span>
+      {/* Bottom row: recent errors + pending approvals */}
+      <div className="grid grid-cols-2 gap-4 mb-4">
+        {/* Recent errors */}
+        <motion.div
+          className="rounded p-4"
+          style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.35 }}
+        >
+          <div className="flex items-center justify-between mb-3">
+            <p className="section-title">recent errors</p>
+            <button
+              className="text-xs font-mono"
+              style={{ color: 'var(--text-mute)', textDecoration: 'underline dotted' }}
+              onClick={() => navigate('/monitor')}
+            >
+              view all
+            </button>
+          </div>
+          {recentTrackers.length === 0 ? (
+            <p className="text-xs font-mono" style={{ color: 'var(--text-mute)' }}>No open errors</p>
+          ) : (
+            <div className="space-y-2">
+              {recentTrackers.slice(0, 4).map(t => (
+                <div key={t.fingerprint} className="flex items-start gap-2 text-xs">
+                  <span
+                    className="w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1"
+                    style={{ background: SEV_DOT[t.severity] ?? 'var(--red)' }}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-mono truncate" style={{ color: 'var(--text)' }}>{t.errorName}</p>
+                    <p className="font-mono truncate" style={{ color: 'var(--text-mute)', fontSize: 10 }}>
+                      ×{t.occurrences} · {formatDistanceToNow(new Date(t.lastOccurrence), { addSuffix: true })}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
-          {config.llm?.mode === 'groq' && (
-            <span style={{ color: 'var(--text-dim)' }}>llama-3.3-70b-versatile</span>
+        </motion.div>
+
+        {/* Pending approvals */}
+        <motion.div
+          className="rounded p-4"
+          style={{ background: 'var(--surface)', border: `1px solid ${pendingApprovals > 0 ? 'rgba(212,160,23,0.3)' : 'var(--border)'}` }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.4 }}
+        >
+          <div className="flex items-center justify-between mb-3">
+            <p className="section-title">approvals</p>
+            {pendingApprovals > 0 && (
+              <button
+                className="text-xs font-mono"
+                style={{ color: 'var(--amber)', textDecoration: 'underline dotted' }}
+                onClick={() => navigate('/approvals')}
+              >
+                review
+              </button>
+            )}
+          </div>
+          {pendingApprovals === 0 ? (
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-xs" style={{ color: 'var(--teal)' }}>✓</span>
+              <span className="text-xs" style={{ color: 'var(--text-dim)' }}>All clear</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-3">
+              <span
+                className="font-mono text-3xl font-bold"
+                style={{ color: 'var(--amber)' }}
+              >
+                {pendingApprovals}
+              </span>
+              <div>
+                <p className="text-xs font-semibold" style={{ color: 'var(--amber)' }}>
+                  pending {pendingApprovals === 1 ? 'approval' : 'approvals'}
+                </p>
+                <p className="text-xs" style={{ color: 'var(--text-dim)' }}>
+                  Brain proposed code changes awaiting your review
+                </p>
+              </div>
+            </div>
           )}
-          {config.llm?.mode === 'ollama' && (
-            <span style={{ color: 'var(--text-dim)' }}>running locally</span>
-          )}
-        </div>
-      </motion.div>
+        </motion.div>
+      </div>
+
+      {/* AI Engine — two-tier system */}
+      <AIEnginePanel config={config} />
     </div>
   );
 }
 
-// ─── Export ───────────────────────────────────────────────────────────────────
+// ─── AI Engine panel ──────────────────────────────────────────────────────────
+
+function AIEnginePanel({ config }: { config: LynxConfig }) {
+  const mesh = useQuery<MeshStatus>({
+    queryKey: ['mesh-status'],
+    queryFn: () => fetch('/api/mesh/status').then(r => r.json()),
+    refetchInterval: 60_000,
+  });
+
+  const orchestratorProvider = config.orchestrator?.provider ?? config.llm?.mode ?? 'none';
+  const isOrchestratorCloud  = ['groq', 'claude-api', 'claude-cli', 'openai', 'gemini'].includes(orchestratorProvider);
+  const m = mesh.data;
+
+  const MODEL_ROLES = ['general', 'coder', 'reasoner', 'autocomplete'] as const;
+
+  return (
+    <motion.div
+      className="rounded p-4 mt-4"
+      style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ delay: 0.4 }}
+    >
+      <p className="section-title mb-3">ai engine</p>
+
+      {/* Two-tier diagram row */}
+      <div className="flex items-stretch gap-3 mb-4">
+        {/* Orchestrator tier */}
+        <div
+          className="flex-1 rounded p-3"
+          style={{ background: 'var(--bg)', border: `1px solid ${isOrchestratorCloud ? 'var(--purple)40' : 'var(--border)'}` }}
+        >
+          <p className="font-mono text-xs mb-1" style={{ color: 'var(--text-mute)' }}>ORCHESTRATOR</p>
+          <div className="flex items-center gap-2">
+            <span
+              className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+              style={{ background: isOrchestratorCloud ? 'var(--purple-hi)' : 'var(--text-mute)' }}
+            />
+            <span className="text-xs font-semibold capitalize" style={{ color: isOrchestratorCloud ? 'var(--purple-hi)' : 'var(--text-dim)' }}>
+              {orchestratorProvider === 'none' ? 'not configured' : orchestratorProvider}
+            </span>
+          </div>
+          <p className="text-xs mt-1" style={{ color: 'var(--text-mute)' }}>
+            {orchestratorProvider === 'groq'      && 'llama-3.3-70b-versatile'}
+            {orchestratorProvider === 'claude-api' && 'claude-sonnet-4-6'}
+            {orchestratorProvider === 'claude-cli' && 'claude cli'}
+            {orchestratorProvider === 'openai'    && 'gpt-4o'}
+            {orchestratorProvider === 'gemini'    && 'gemini-pro'}
+            {orchestratorProvider === 'none'      && 'routes tasks, plans, decides'}
+          </p>
+          <p className="text-xs mt-1.5 italic" style={{ color: 'var(--text-mute)', opacity: 0.6 }}>
+            plans · decides · synthesizes
+          </p>
+        </div>
+
+        {/* Arrow */}
+        <div className="flex items-center justify-center flex-shrink-0 px-1">
+          <div className="flex flex-col items-center gap-0.5">
+            <span className="font-mono text-xs" style={{ color: 'var(--text-mute)' }}>routes</span>
+            <span className="font-mono" style={{ color: 'var(--text-mute)' }}>↓</span>
+          </div>
+        </div>
+
+        {/* Executor tier */}
+        <div
+          className="flex-1 rounded p-3"
+          style={{ background: 'var(--bg)', border: `1px solid ${m?.active ? 'rgba(29,184,124,0.3)' : 'var(--border)'}` }}
+        >
+          <p className="font-mono text-xs mb-1" style={{ color: 'var(--text-mute)' }}>EXECUTOR MESH</p>
+          <div className="flex items-center gap-2">
+            <span
+              className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+              style={{ background: m?.active ? 'var(--teal)' : 'var(--text-mute)' }}
+            />
+            <span className="text-xs font-semibold" style={{ color: m?.active ? 'var(--teal)' : 'var(--text-dim)' }}>
+              {m ? m.bundleName : (config.executor?.provider ?? 'ollama')}
+            </span>
+          </div>
+          <p className="text-xs mt-1" style={{ color: 'var(--text-mute)' }}>
+            {m ? `${m.ram}GB RAM · ${m.parallel ? 'parallel' : 'serial'} · ${m.useCase}` : 'local · private · free'}
+          </p>
+          <p className="text-xs mt-1.5 italic" style={{ color: 'var(--text-mute)', opacity: 0.6 }}>
+            executes · codes · generates
+          </p>
+        </div>
+      </div>
+
+      {/* Specialist model grid */}
+      {m?.models && (
+        <div className="grid grid-cols-2 gap-2">
+          {MODEL_ROLES.map((role) => {
+            const spec = m.models[role];
+            if (!spec) return null;
+            return (
+              <div
+                key={role}
+                className="rounded px-3 py-2 flex items-center gap-2"
+                style={{ background: 'var(--surface2)', border: '1px solid var(--border)' }}
+              >
+                <span className="font-mono text-xs flex-shrink-0" style={{ color: 'var(--text-mute)', minWidth: 80 }}>
+                  {role}
+                </span>
+                <span className="text-xs truncate" style={{ color: 'var(--text-dim)' }}>
+                  {spec.name ?? spec.tag ?? '—'}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {!m && !mesh.isLoading && (
+        <p className="text-xs" style={{ color: 'var(--text-mute)' }}>
+          Mesh not initialized yet — send a message in Brain to activate
+        </p>
+      )}
+    </motion.div>
+  );
+}
 
 export function OverviewPage() {
   const config = getConfig();
   const hasProject = !!(config?.projectPath);
 
-  if (!hasProject) return <NoProject />;
+  if (!hasProject) return <Navigate to="/landing" replace />;
   return <ConnectedDashboard config={config!} />;
 }

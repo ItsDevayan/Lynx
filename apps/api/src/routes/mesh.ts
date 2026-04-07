@@ -39,7 +39,12 @@ function loadSavedConfig(): { bundleId?: string; useCase?: string; ram?: number 
   return {};
 }
 
-function ensureMesh(): LLMesh {
+let _systemContext: string | undefined;
+
+function ensureMesh(systemContext?: string): LLMesh {
+  // Update system context if provided
+  if (systemContext) _systemContext = systemContext;
+
   let mesh = getMesh();
   if (mesh) return mesh;
 
@@ -57,9 +62,12 @@ function ensureMesh(): LLMesh {
       sessionTtlMs: 30 * 60 * 1000,
     },
     async (messages) => {
-      // Conductor function — uses the configured orchestrator from llm-router
+      // Conductor function — inject system context + use configured orchestrator
       const { orchestrate } = await import('@lynx/core');
-      return orchestrate(messages, { tier: 'heavy' });
+      const withCtx = _systemContext
+        ? [{ role: 'system' as const, content: _systemContext }, ...messages.filter(m => m.role !== 'system')]
+        : messages;
+      return orchestrate(withCtx as any, { tier: 'heavy' });
     },
   );
 
@@ -76,6 +84,8 @@ export async function meshRoutes(app: FastifyInstance): Promise<void> {
       prompt: string;
       sessionId?: string;
       forceTask?: string;
+      systemContext?: string;
+      history?: Array<{ role: string; content: string }>;
     };
   }>(
     '/api/mesh/chat',
@@ -85,28 +95,46 @@ export async function meshRoutes(app: FastifyInstance): Promise<void> {
           type: 'object',
           required: ['prompt'],
           properties: {
-            prompt:    { type: 'string' },
-            sessionId: { type: 'string' },
-            forceTask: { type: 'string' },
+            prompt:        { type: 'string' },
+            sessionId:     { type: 'string' },
+            forceTask:     { type: 'string' },
+            systemContext: { type: 'string' },
+            history:       { type: 'array' },
           },
         },
       },
     },
     async (req, reply) => {
-      const { prompt, sessionId, forceTask } = req.body;
+      const { prompt, sessionId, systemContext, history } = req.body;
 
       try {
-        const mesh = ensureMesh();
-        const response = await mesh.route(prompt, sessionId, forceTask as any);
+        const mesh = ensureMesh(systemContext);
+        const sid  = sessionId ?? 'default';
+
+        // Seed history into session memory if provided
+        if (history && history.length > 0) {
+          const existing = getSession(sid);
+          if (existing.length === 0) {
+            for (const h of history.slice(-10)) {
+              addToSession(sid, { role: h.role as 'user' | 'assistant', content: h.content });
+            }
+          }
+        }
+
+        const response = await mesh.route(prompt);
 
         return reply.send({
           ok: true,
-          content: response.content,
-          task:    response.task,
-          model:   response.model,
-          role:    response.role,
-          thinking: response.thinking ?? null,
-          sessionId: sessionId ?? 'default',
+          content:       response.content,
+          task:          response.taskType,
+          conductor:     response.conductor,
+          specialist:    response.specialist,
+          thinking:      response.thinking ?? null,
+          isBottleneck:  response.isBottleneck,
+          bottleneck:    response.bottleneckReason ?? null,
+          executionMode: response.executionMode,
+          stepsLog:      response.stepsLog,
+          sessionId:     sid,
         });
       } catch (err: any) {
         app.log.error(err, '[mesh] chat error');

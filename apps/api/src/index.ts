@@ -17,6 +17,7 @@ import { closePool } from './db/pg.js';
 import { RetentionService } from '@lynx/monitor';
 import { PgEventStore, PgErrorTrackerStore } from './db/stores.js';
 import { configureLLM } from '@lynx/core';
+import { wsClients } from './ws-registry.js';
 
 // Routes
 import { healthRoutes } from './routes/health.js';
@@ -26,6 +27,14 @@ import { hitlRoutes } from './routes/hitl.js';
 import { chatRoutes } from './routes/chat.js';
 import { setupRoutes } from './routes/setup.js';
 import { meshRoutes } from './routes/mesh.js';
+import { filesRoutes } from './routes/files.js';
+import { testsRoutes } from './routes/tests.js';
+import { securityRoutes } from './routes/security.js';
+import { scoutRoutes } from './routes/scout.js';
+import { crawlRoutes } from './routes/crawl.js';
+import { gitRoutes } from './routes/git.js';
+import { integrationsRoutes } from './routes/integrations.js';
+import { memoryRoutes } from './routes/memory.js';
 
 const PORT = parseInt(process.env.API_PORT ?? '4000', 10);
 const HOST = process.env.API_HOST ?? '0.0.0.0';
@@ -88,6 +97,8 @@ async function start(): Promise<void> {
 
   // WebSocket endpoint — real-time push
   app.get('/ws', { websocket: true }, (socket) => {
+    wsClients.add(socket);
+
     socket.on('message', (msg: Buffer | string) => {
       try {
         const data = JSON.parse(msg.toString());
@@ -96,6 +107,9 @@ async function start(): Promise<void> {
         }
       } catch { /* ignore malformed */ }
     });
+
+    socket.on('close', () => wsClients.delete(socket));
+    socket.on('error', () => wsClients.delete(socket));
 
     socket.send(JSON.stringify({ type: 'connected', message: 'Lynx WS ready' }));
   });
@@ -108,6 +122,14 @@ async function start(): Promise<void> {
   await app.register(chatRoutes);
   await app.register(setupRoutes);
   await app.register(meshRoutes);
+  await app.register(filesRoutes);
+  await app.register(testsRoutes);
+  await app.register(securityRoutes);
+  await app.register(scoutRoutes);
+  await app.register(crawlRoutes);
+  await app.register(gitRoutes);
+  await app.register(integrationsRoutes);
+  await app.register(memoryRoutes);
 
   // Run migrations
   await runMigrations();

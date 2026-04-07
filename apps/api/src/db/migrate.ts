@@ -65,19 +65,42 @@ export async function runMigrations(): Promise<void> {
 
   await query(`
     CREATE TABLE IF NOT EXISTS hitl_requests (
-      id          TEXT        PRIMARY KEY,
-      type        TEXT        NOT NULL,
-      title       TEXT        NOT NULL,
-      description TEXT        NOT NULL,
-      payload     JSONB       NOT NULL DEFAULT '{}',
-      status      TEXT        NOT NULL DEFAULT 'pending',
-      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      resolved_at TIMESTAMPTZ,
-      resolved_by TEXT,
-      notes       TEXT,
-      timeout_at  TIMESTAMPTZ
+      id                TEXT        PRIMARY KEY,
+      action            TEXT        NOT NULL DEFAULT 'CODE_CHANGE',
+      title             TEXT        NOT NULL,
+      description       TEXT        NOT NULL,
+      thinking          TEXT,
+      proposal          JSONB       NOT NULL DEFAULT '{}',
+      context           JSONB       NOT NULL DEFAULT '{}',
+      status            TEXT        NOT NULL DEFAULT 'PENDING',
+      created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at        TIMESTAMPTZ,
+      approved_by       TEXT,
+      approved_at       TIMESTAMPTZ,
+      rejected_by       TEXT,
+      rejected_at       TIMESTAMPTZ,
+      rejection_reason  TEXT,
+      modified_proposal TEXT
     )
   `);
+
+  // Additive migration: add new columns if table already exists with old schema
+  const addColIfMissing = async (col: string, def: string) => {
+    try {
+      await query(`ALTER TABLE hitl_requests ADD COLUMN IF NOT EXISTS ${col} ${def}`);
+    } catch { /* ignore */ }
+  };
+  await addColIfMissing('action',            'TEXT NOT NULL DEFAULT \'CODE_CHANGE\'');
+  await addColIfMissing('thinking',          'TEXT');
+  await addColIfMissing('proposal',          'JSONB NOT NULL DEFAULT \'{}\'');
+  await addColIfMissing('context',           'JSONB NOT NULL DEFAULT \'{}\'');
+  await addColIfMissing('expires_at',        'TIMESTAMPTZ');
+  await addColIfMissing('approved_by',       'TEXT');
+  await addColIfMissing('approved_at',       'TIMESTAMPTZ');
+  await addColIfMissing('rejected_by',       'TEXT');
+  await addColIfMissing('rejected_at',       'TIMESTAMPTZ');
+  await addColIfMissing('rejection_reason',  'TEXT');
+  await addColIfMissing('modified_proposal', 'TEXT');
 
   await query(`CREATE INDEX IF NOT EXISTS hitl_status_idx ON hitl_requests (status)`);
 
